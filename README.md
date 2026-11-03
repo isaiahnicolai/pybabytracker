@@ -6,8 +6,9 @@
 
 Async Python client for the sync service of
 [Baby Tracker](https://apps.apple.com/us/app/baby-tracker-newborn-log/id779656557), the app by
-[Nighp](https://nighp.com), built for a Home Assistant integration. It is unofficial and
-identifies itself honestly (`pybabytracker/<version>`).
+[Nighp](https://nighp.com), built for the
+[Baby Tracker (Nighp) for Home Assistant](https://github.com/wtadler/ha-baby-tracker)
+integration. It is unofficial and identifies itself as `pybabytracker/<version>`.
 
 ## Use
 
