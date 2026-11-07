@@ -26,9 +26,11 @@ async def test_a_picture_the_service_has_comes_back_as_its_bytes(
     assert fake_server.calls("GET", "/account/picture/PHOTO-1.jpg")
 
 
+@pytest.mark.parametrize("status", [400, 404])
 async def test_a_picture_the_service_does_not_have_is_none(
-    client: BabyTrackerClient, fake_server: FakeSyncServer
+    client: BabyTrackerClient, fake_server: FakeSyncServer, status: int
 ) -> None:
+    fake_server.missing_picture_status = status
     assert await client.get_picture("MISSING.jpg") is None
 
 

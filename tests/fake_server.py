@@ -79,6 +79,8 @@ class FakeSyncServer:
         self.base_url = ""
         # Picture files the service has, by file name.
         self.pictures: dict[str, bytes] = {}
+        # The status for a picture it doesn't have: the live service answers 400.
+        self.missing_picture_status = 400
 
     # --- test setup helpers -------------------------------------------------
 
@@ -172,7 +174,7 @@ class FakeSyncServer:
             return rejected
         content = self.pictures.get(request.match_info["name"])
         if content is None:
-            return web.Response(status=404, text="Not Found")
+            return web.Response(status=self.missing_picture_status, text="Not Found")
         return web.Response(body=content, content_type="image/jpeg")
 
     async def _get_devices(self, request: web.Request) -> web.Response:

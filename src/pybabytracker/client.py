@@ -205,15 +205,17 @@ class BabyTrackerClient:
     async def get_picture(self, file_name: str) -> bytes | None:
         """Download a picture file, such as a baby's photo (``Baby.picture_file``).
 
-        Returns ``None`` when the service doesn't have the file (``404``). A name with a path
+        Returns ``None`` when the service doesn't have the file. It answers ``400`` for that (seen
+        for a picture's ".mp4" name when the picture is a photo), so ``400`` and ``404`` both
+        mean no file. A name with a path
         separator, or none at all, raises ``ValueError`` without a request: names come from
         other devices' records.
         """
         if not file_name or "/" in file_name or "\\" in file_name or file_name in (".", ".."):
             raise ValueError(f"not a picture file name: {file_name!r}")
         path = f"/account/picture/{quote(file_name, safe='')}"
-        status, content = await self._authorized(lambda: self._send_bytes(path), allow=(404,))
-        return None if status == 404 else content
+        status, content = await self._authorized(lambda: self._send_bytes(path), allow=(400, 404))
+        return None if status in (400, 404) else content
 
     async def _request(
         self, method: str, path: str, body: Any = None, *, expect_json: bool = True
