@@ -77,6 +77,8 @@ class FakeSyncServer:
         self.post_script: list[str] = []
         self.post_stall = 1.0
         self.base_url = ""
+        # Picture files the service has, by file name.
+        self.pictures: dict[str, bytes] = {}
 
     # --- test setup helpers -------------------------------------------------
 
@@ -119,6 +121,7 @@ class FakeSyncServer:
         app.router.add_get("/account/device", self._get_devices)
         app.router.add_get("/account/transaction/{uuid}/{since}", self._get_transactions)
         app.router.add_post("/account/transaction", self._post_transaction)
+        app.router.add_get("/account/picture/{name}", self._get_picture)
         return app
 
     @staticmethod
@@ -163,6 +166,14 @@ class FakeSyncServer:
             if request.path.endswith(suffix):
                 return web.Response(status=status, text="forced")
         return None
+
+    async def _get_picture(self, request: web.Request) -> web.Response:
+        if (rejected := await self._guard(request)) is not None:
+            return rejected
+        content = self.pictures.get(request.match_info["name"])
+        if content is None:
+            return web.Response(status=404, text="Not Found")
+        return web.Response(body=content, content_type="image/jpeg")
 
     async def _get_devices(self, request: web.Request) -> web.Response:
         if (rejected := await self._guard(request)) is not None:

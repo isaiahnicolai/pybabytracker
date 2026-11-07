@@ -148,6 +148,15 @@ def _volume_of(amount: Any, is_english_scale: Any) -> Volume | None:
     return None
 
 
+def _picture_stem(name: object) -> str | None:
+    """A ``pictureName`` without a ".jpg" an older app may have kept, or ``None`` when it's empty
+    or isn't a plain file name."""
+    if not isinstance(name, str) or not name or "/" in name or "\\" in name:
+        return None
+    stem = name[:-4] if name.lower().endswith(".jpg") else name
+    return stem if stem not in ("", ".", "..") else None
+
+
 def _key(name: str, codec: str | None = None) -> Any:
     """An optional payload field stored under ``name``."""
     return field(default=None, metadata={"key": name, "codec": codec})
@@ -297,6 +306,20 @@ class Baby(Record):
     due_day: str | None = _opt("dueDay")
     gender: str | None = _opt("gender")
     picture_name: str | None = _opt("pictureName")
+
+    @property
+    def picture_file(self) -> str | None:
+        """The photo's file on the service, ``pictureName`` plus ".jpg" (app: ``Baby``), or
+        ``None`` when the baby has no photo. Pass it to ``BabyTrackerClient.get_picture``."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}.jpg" if stem else None
+
+    @property
+    def landscape_picture_file(self) -> str | None:
+        """The landscape crop's file, ``pictureName`` plus "_l.jpg" (app:
+        ``Baby.getPictureLandscapeFile``). Not every baby with a photo has one."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}_l.jpg" if stem else None
 
 
 @_register
