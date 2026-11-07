@@ -333,13 +333,34 @@ class Pumped(Record):
 @_register
 @dataclass(kw_only=True)
 class OtherFeed(Record):
+    """A solid food or other feed. The synced payload embeds the food as ``feedType`` (with its
+    ``name``) and gives the amount as a ``VolumeMeasure`` whose number counts ``unit``, which is
+    free text such as "Oz", "Pieces", or "Tsp"."""
+
     object_type: ClassVar[str] = "OtherFeed"
 
+    feed_type: dict[str, Any] | None = _opt("feedType")
+    desc: dict[str, Any] | None = _opt("desc")
+    # The app's database columns, kept for payloads that carry them.
     desc_id: str | None = _opt("descID")
     type_id: str | None = _opt("typeID")
-    amount: float | None = _opt("amount")
+    amount: VolumeMeasure | float | None = _vol("amount")
     is_english_scale: int | None = _opt("isEnglishScale")
     unit: str | None = _opt("unit")
+
+    @property
+    def food_name(self) -> str | None:
+        """The embedded food's name, when it has one."""
+        food = self.feed_type
+        name = food.get("name") if isinstance(food, dict) else None
+        return name if isinstance(name, str) else None
+
+    @property
+    def quantity(self) -> float | None:
+        """How many of ``unit`` were eaten, from the measure or a plain number."""
+        if isinstance(self.amount, VolumeMeasure):
+            return _number(self.amount.value)
+        return _number(self.amount)
 
 
 @_register

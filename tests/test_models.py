@@ -11,6 +11,7 @@ from factories import ALL_TYPES, BABY_ID, baby_payload, encode_b64, payload_for
 from pybabytracker import (
     Baby,
     Diaper,
+    OtherFeed,
     Sleep,
     TransactionDecodeError,
     UnknownRecord,
@@ -197,3 +198,28 @@ def test_a_known_type_with_an_unexpected_value_is_kept_raw(overrides: dict[str, 
     assert record.record_type == "Sleep"
     assert record.to_payload() == payload
     assert _round_trip(payload) == payload
+
+
+def test_a_solid_feed_reads_its_synced_food_and_quantity() -> None:
+    payload = payload_for(
+        "OtherFeed",
+        feedType={
+            "BCObjectType": "OtherFeedSelection",
+            "objectID": "food-1",
+            "name": "Test Food",
+            "bottle": "false",
+        },
+        desc={"BCObjectType": "FeedDescription", "objectID": "desc-1"},
+        amount={"BCObjectType": "VolumeMeasure", "englishMeasure": "true", "value": 2},
+        unit="Pieces",
+    )
+    record = decode_transaction(encode_b64(payload))
+    assert isinstance(record, OtherFeed)
+    assert (record.food_name, record.quantity, record.unit) == ("Test Food", 2.0, "Pieces")
+    assert _round_trip(payload) == payload
+
+
+def test_a_solid_feed_with_a_plain_amount_and_no_food_still_reads() -> None:
+    record = decode_transaction(encode_b64(payload_for("OtherFeed")))
+    assert isinstance(record, OtherFeed)
+    assert (record.food_name, record.quantity) == (None, 2.5)
