@@ -257,7 +257,9 @@ def test_a_growth_reads_its_synced_measures() -> None:
     assert record.head_reading == Measurement(14.0, "in")
 
 
-@pytest.mark.parametrize(("english", "metric"), [("false", True), (False, True), (None, True)])
+@pytest.mark.parametrize(
+    ("english", "metric"), [("false", True), (False, True), (None, True), (1, True), ("1", True)]
+)
 def test_a_metric_growth_reads_kilograms_and_centimeters(english: Any, metric: bool) -> None:
     def measure(kind: str, value: float) -> dict[str, Any]:
         found: dict[str, Any] = {"BCObjectType": kind, "value": value}

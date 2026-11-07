@@ -76,7 +76,9 @@ def _measurement(field: Any, is_english_scale: Any, units: tuple[str, str]) -> M
         number = _number(field.get("value"))
         if number is None:
             return None
-        english = field.get("englishMeasure") in ("true", True)
+        english_measure = field.get("englishMeasure")
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as the US unit.
+        english = english_measure == "true" or english_measure is True
         return Measurement(number, english_unit if english else metric_unit)
     number = _number(field)
     if number is None or isinstance(is_english_scale, bool) or is_english_scale not in (0, 1):
