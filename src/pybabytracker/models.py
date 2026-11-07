@@ -446,11 +446,23 @@ class Milestone(Record):
 @_register
 @dataclass(kw_only=True)
 class OtherActivity(Record):
+    """An activity such as tummy time, with a ``duration`` in minutes. The sync payload embeds the
+    activity as ``desc`` (an ``OtherActivityDescription`` with its ``name``); the database's
+    ``descID`` and ``locationID`` are kept for payloads that carry them. The Android app logs a
+    bath as an activity named "Bath"."""
+
     object_type: ClassVar[str] = "OtherActivity"
 
+    desc: dict[str, Any] | None = _opt("desc")
     desc_id: str | None = _opt("descID")
     location_id: str | None = _opt("locationID")
     duration: int | None = _opt("duration")
+
+    @property
+    def activity_name(self) -> str | None:
+        """The embedded activity's name, such as "Tummy Time"."""
+        name = self.desc.get("name") if isinstance(self.desc, dict) else None
+        return name if isinstance(name, str) else None
 
 
 @_register
