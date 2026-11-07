@@ -34,8 +34,12 @@ _TIME = "time"
 _BABY = "baby"
 _VOLUME = "volume"
 
-SIDE_LEFT = 0
-SIDE_RIGHT = 1
+# The app's finishSide values for nursing and pumps: 0 is not set, 1 left, 2 right. Synced
+# records agree: left-only sessions carry 1 and right-only ones 2, from iOS and Android alike.
+# A pump with both sides used is usually saved with 0.
+SIDE_NONE = 0
+SIDE_LEFT = 1
+SIDE_RIGHT = 2
 
 UNIT_OUNCES = "oz"
 UNIT_MILLILITERS = "ml"
@@ -53,8 +57,8 @@ class VolumeMeasure:
 
     The raw object is kept as is, so unknown keys and odd values survive a round trip.
     ``englishMeasure`` "true" means ounces and "false" means milliliters, both observed in captures
-    (2026-10-26; a metric write carries the number as entered). Any other value, or no key, is read
-    as milliliters.
+    (2026-10-26; a metric write carries the number as entered). The Android app sends the JSON
+    booleans ``true`` and ``false`` instead. Any other value, or no key, is read as milliliters.
     """
 
     def __init__(
@@ -86,7 +90,9 @@ class VolumeMeasure:
         number = _number(self.value)
         if number is None:
             return None
-        unit = UNIT_OUNCES if self.english_measure == "true" else UNIT_MILLILITERS
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as ounces.
+        english = self.english_measure == "true" or self.english_measure is True
+        unit = UNIT_OUNCES if english else UNIT_MILLILITERS
         return Volume(number, unit)
 
     def to_payload(self) -> dict[str, Any]:
@@ -99,6 +105,26 @@ class VolumeMeasure:
 
     def __repr__(self) -> str:
         return f"VolumeMeasure({self.raw!r})"
+
+
+def numeric_code(value: Any) -> int | None:
+    """A numeric code, such as a diaper's ``status`` or a ``finishSide``, as an int.
+
+    iOS sends these as numbers and the Android app as strings of digits (``"1"``), so both are
+    read; anything else (a bool, a fraction, other text, a string too long to convert) is
+    ``None``. Only ASCII digits count, which is all the apps send. The record keeps the raw
+    value, so the round trip is unchanged.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        try:
+            return int(value)
+        except ValueError:  # past Python's int-string limit
+            return None
+    return None
 
 
 def _number(value: Any) -> float | None:
@@ -303,6 +329,15 @@ class Nursing(Record):
 
 @_register
 @dataclass(kw_only=True)
+class NursingSession(Nursing):
+    """A nursing session from the Android app's timer, which syncs under this type name. It
+    has the ``Nursing`` fields plus ``detailed`` and the per-side timestamps, kept in ``extra``."""
+
+    object_type: ClassVar[str] = "NursingSession"
+
+
+@_register
+@dataclass(kw_only=True)
 class Formula(Record):
     object_type: ClassVar[str] = "Formula"
 
@@ -415,6 +450,25 @@ class Medicine(Record):
 
     med_id: str | None = _opt("medID")
     amount: float | None = _opt("amount")
+
+
+@_register
+@dataclass(kw_only=True)
+class Medication(Record):
+    """A dose of a medicine, as the apps sync one. The medicine itself (``name``, ``unit``,
+    ``amountPerTime``, ``interval``, ``objectID``) is embedded as ``medicationSelection``."""
+
+    object_type: ClassVar[str] = "Medication"
+
+    medication_selection: dict[str, Any] | None = _opt("medicationSelection")
+    amount: float | None = _opt("amount")
+
+    @property
+    def medicine_name(self) -> str | None:
+        """The embedded medicine's name, when it has one."""
+        selection = self.medication_selection
+        name = selection.get("name") if isinstance(selection, dict) else None
+        return name if isinstance(name, str) else None
 
 
 @_register

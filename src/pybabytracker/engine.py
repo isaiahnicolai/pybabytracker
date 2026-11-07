@@ -399,8 +399,8 @@ class SyncEngine:
 
         The record's ``time`` is the session's start, as in the capture: ``start_time`` if
         given, else ``end_time`` minus the total minutes, else now minus the total minutes
-        (the session just ended). Give at most one of them. ``finish_side`` (``SIDE_LEFT`` or
-        ``SIDE_RIGHT``) defaults to the last side used, right when both were.
+        (the session just ended). Give at most one of them. ``finish_side`` (``SIDE_LEFT``,
+        ``SIDE_RIGHT``, or ``SIDE_NONE``) defaults to the last side used, right when both were.
         """
         draft = draft_nursing(
             left_minutes=left_minutes,
