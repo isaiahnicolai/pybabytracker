@@ -307,6 +307,15 @@ class Nursing(Record):
 
 @_register
 @dataclass(kw_only=True)
+class NursingSession(Nursing):
+    """A nursing session from the Android app's timer, which syncs under this type name. It
+    has the ``Nursing`` fields plus ``detailed`` and the per-side timestamps, kept in ``extra``."""
+
+    object_type: ClassVar[str] = "NursingSession"
+
+
+@_register
+@dataclass(kw_only=True)
 class Formula(Record):
     object_type: ClassVar[str] = "Formula"
 
@@ -419,6 +428,25 @@ class Medicine(Record):
 
     med_id: str | None = _opt("medID")
     amount: float | None = _opt("amount")
+
+
+@_register
+@dataclass(kw_only=True)
+class Medication(Record):
+    """A dose of a medicine, as the apps sync one. The medicine itself (``name``, ``unit``,
+    ``amountPerTime``, ``interval``, ``objectID``) is embedded as ``medicationSelection``."""
+
+    object_type: ClassVar[str] = "Medication"
+
+    medication_selection: dict[str, Any] | None = _opt("medicationSelection")
+    amount: float | None = _opt("amount")
+
+    @property
+    def medicine_name(self) -> str | None:
+        """The embedded medicine's name, when it has one."""
+        selection = self.medication_selection
+        name = selection.get("name") if isinstance(selection, dict) else None
+        return name if isinstance(name, str) else None
 
 
 @_register
