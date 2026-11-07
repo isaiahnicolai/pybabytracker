@@ -12,6 +12,8 @@ from pybabytracker import (
     Baby,
     Diaper,
     Sleep,
+    Temperature,
+    TemperatureReading,
     TransactionDecodeError,
     UnknownRecord,
     decode_transaction,
@@ -197,3 +199,24 @@ def test_a_known_type_with_an_unexpected_value_is_kept_raw(overrides: dict[str, 
     assert record.record_type == "Sleep"
     assert record.to_payload() == payload
     assert _round_trip(payload) == payload
+
+
+@pytest.mark.parametrize(
+    ("english", "unit"), [("true", "F"), (True, "F"), ("false", "C"), (False, "C"), (None, "C")]
+)
+def test_a_temperature_reads_its_synced_measure(english: Any, unit: str) -> None:
+    measure: dict[str, Any] = {"BCObjectType": "TemperatureMeasure", "value": 37.5}
+    if english is not None:
+        measure["englishMeasure"] = english
+    payload = payload_for("Temperature", temperature=measure)
+    record = decode_transaction(encode_b64(payload))
+    assert isinstance(record, Temperature)
+    assert record.reading == TemperatureReading(37.5, unit)
+    assert _round_trip(payload) == payload
+
+
+@pytest.mark.parametrize("measure", [None, "warm", {"value": "hot"}, {"englishMeasure": "true"}])
+def test_a_temperature_without_a_numeric_measure_has_no_reading(measure: Any) -> None:
+    record = decode_transaction(encode_b64(payload_for("Temperature", temperature=measure)))
+    assert isinstance(record, Temperature)
+    assert record.reading is None

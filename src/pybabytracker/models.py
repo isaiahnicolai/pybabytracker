@@ -39,10 +39,19 @@ SIDE_RIGHT = 1
 
 UNIT_OUNCES = "oz"
 UNIT_MILLILITERS = "ml"
+UNIT_FAHRENHEIT = "F"
+UNIT_CELSIUS = "C"
 
 
 class Volume(NamedTuple):
     """An amount of liquid: a number and its unit, ``"oz"`` or ``"ml"``."""
+
+    value: float
+    unit: str
+
+
+class TemperatureReading(NamedTuple):
+    """A temperature: a number and its unit, ``"F"`` or ``"C"``."""
 
     value: float
     unit: str
@@ -422,8 +431,28 @@ class Medicine(Record):
 class Temperature(Record):
     object_type: ClassVar[str] = "Temperature"
 
+    # The sync payload's reading: {"BCObjectType": "TemperatureMeasure", "value", "englishMeasure"}.
+    temperature: dict[str, Any] | None = _opt("temperature")
+    # The app's database columns, kept for payloads that carry them.
     temp: float | None = _opt("temp")
     is_english_scale: int | None = _opt("isEnglishScale")
+
+    @property
+    def reading(self) -> TemperatureReading | None:
+        """The synced reading, or ``None`` when there isn't one with a number.
+
+        ``englishMeasure`` "true" (or the Android app's ``true``) means Fahrenheit; anything else
+        is Celsius. The value is as sent: the apps store it as a 32-bit float, so 100.4 can
+        arrive as 100.4000015258789.
+        """
+        measure = self.temperature
+        if not isinstance(measure, dict):
+            return None
+        number = _number(measure.get("value"))
+        if number is None:
+            return None
+        english = measure.get("englishMeasure") in ("true", True)
+        return TemperatureReading(number, UNIT_FAHRENHEIT if english else UNIT_CELSIUS)
 
 
 @_register

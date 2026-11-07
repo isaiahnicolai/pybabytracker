@@ -59,7 +59,13 @@ TYPE_FIELDS: dict[str, dict[str, Any]] = {
         "isEnglishWeightScale": 1,
     },
     "Medicine": {"medID": "med-1", "amount": 2.5},
-    "Temperature": {"temp": 98.6, "isEnglishScale": 1},
+    "Temperature": {
+        "temperature": {
+            "BCObjectType": "TemperatureMeasure",
+            "value": 100.4,
+            "englishMeasure": "true",
+        }
+    },
     "Vaccine": {"vaccID": "vacc-1", "docVisitID": "visit-1"},
     "Milestone": {"milestoneSelectionID": "milestone-1"},
     "OtherActivity": {"descID": "desc-1", "locationID": "loc-1", "duration": 900},
