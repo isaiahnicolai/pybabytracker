@@ -88,8 +88,9 @@ def test_nursing_and_bottles_are_feeds() -> None:
         record("Nursing", NOON),
         record("Formula", NOON + timedelta(minutes=1)),
         record("Pumped", NOON + timedelta(minutes=2)),
+        record("NursingSession", NOON + timedelta(minutes=3)),
     )
-    assert result.feeds == 3
+    assert result.feeds == 4
 
 
 def test_other_records_are_not_counted() -> None:

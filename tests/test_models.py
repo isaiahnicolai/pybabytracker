@@ -11,6 +11,9 @@ from factories import ALL_TYPES, BABY_ID, baby_payload, encode_b64, payload_for
 from pybabytracker import (
     Baby,
     Diaper,
+    Medication,
+    Nursing,
+    NursingSession,
     OtherFeed,
     Sleep,
     TransactionDecodeError,
@@ -223,3 +226,25 @@ def test_a_solid_feed_with_a_plain_amount_and_no_food_still_reads() -> None:
     record = decode_transaction(encode_b64(payload_for("OtherFeed")))
     assert isinstance(record, OtherFeed)
     assert (record.food_name, record.quantity) == (None, 2.5)
+
+
+def test_an_android_timer_session_is_a_nursing_record() -> None:
+    # The Android app syncs a timed session as NursingSession; it is still a feed.
+    record = decode_transaction(encode_b64(payload_for("NursingSession")))
+    assert isinstance(record, NursingSession)
+    assert isinstance(record, Nursing)
+    assert (record.left_duration, record.finish_side) == (5, 1)
+    assert record.extra["detailed"] is True
+
+
+def test_a_medication_names_its_embedded_medicine() -> None:
+    record = decode_transaction(encode_b64(payload_for("Medication")))
+    assert isinstance(record, Medication)
+    assert record.amount == 2.5
+    assert record.medicine_name == "Test Medicine"
+
+
+def test_a_medication_without_an_embedded_medicine_has_no_name() -> None:
+    record = decode_transaction(encode_b64(payload_for("Medication", medicationSelection=None)))
+    assert isinstance(record, Medication)
+    assert record.medicine_name is None
