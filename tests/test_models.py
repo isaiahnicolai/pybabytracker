@@ -22,6 +22,7 @@ from pybabytracker import (
     encode_transaction,
     format_time,
     from_unix,
+    numeric_code,
     parse_time,
     to_unix,
 )
@@ -248,3 +249,25 @@ def test_a_medication_without_an_embedded_medicine_has_no_name() -> None:
     record = decode_transaction(encode_b64(payload_for("Medication", medicationSelection=None)))
     assert isinstance(record, Medication)
     assert record.medicine_name is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, 1),
+        ("1", 1),
+        ("12", 12),
+        (0, 0),
+        ("0", 0),
+        (True, None),
+        (1.5, None),
+        ("", None),
+        ("-1", None),
+        ("left", None),
+        (None, None),
+    ],
+)
+def test_numeric_codes_read_ints_and_androids_digit_strings(
+    value: Any, expected: int | None
+) -> None:
+    assert numeric_code(value) == expected
