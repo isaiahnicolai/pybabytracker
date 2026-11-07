@@ -30,6 +30,7 @@ from test_writes import (
 
 from pybabytracker import (
     SIDE_LEFT,
+    SIDE_NONE,
     SIDE_RIGHT,
     BabyTrackerClient,
     BabyTrackerConnectionError,
@@ -120,7 +121,7 @@ async def write_pump(engine: SyncEngine, client: BabyTrackerClient, extra: dict[
         right_volume=Volume(5, "oz"),
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_LEFT,
+        finish_side=SIDE_NONE,  # the capture's 0: no side
         time=at("2026-10-26 16:55:15 +0000"),
         timezone_offset=UTC_MINUS_5,
         **extra,
@@ -135,7 +136,7 @@ async def write_nursing(
         BABY_ID,
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_RIGHT,
+        finish_side=SIDE_LEFT,  # the capture's 1
         start_time=at("2026-10-26 16:55:52 +0000"),
         timezone_offset=UTC_MINUS_5,
         **extra,
@@ -291,7 +292,7 @@ async def test_a_metric_pump_equals_the_captured_pump_with_the_metric_flag(
         right_volume=Volume(150, "ml"),
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_LEFT,
+        finish_side=SIDE_NONE,  # the capture's 0: no side
         time=at("2026-10-26 16:55:15 +0000"),
         timezone_offset=UTC_MINUS_5,
     )
@@ -565,6 +566,7 @@ async def test_nursing_with_no_time_ends_now(
         (5, 5, None, SIDE_RIGHT),
         (5, 5, SIDE_LEFT, SIDE_LEFT),
         (5, 0, SIDE_RIGHT, SIDE_RIGHT),
+        (5, 5, SIDE_NONE, SIDE_NONE),
     ],
 )
 async def test_the_finish_side_defaults_to_the_last_side_nursed_and_an_explicit_one_wins(
@@ -583,6 +585,18 @@ async def test_the_finish_side_defaults_to_the_last_side_nursed_and_an_explicit_
     assert posted(fake_server)["finishSide"] == expected
 
 
+@pytest.mark.parametrize(("left", "right", "wire"), [(5, 0, 1), (0, 5, 2)])
+async def test_the_finish_side_is_written_as_the_app_numbers_it(
+    left: int, right: int, wire: int, client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    # The app writes 1 for left and 2 for right (0 is not set), so a phone shows the right side.
+    engine = await ready(client, fake_server)
+
+    await engine.add_nursing(client, BABY_ID, left_minutes=left, right_minutes=right)
+
+    assert posted(fake_server)["finishSide"] == wire
+
+
 async def test_a_nursing_record_decodes_with_both_durations_and_the_side(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
@@ -591,7 +605,7 @@ async def test_a_nursing_record_decodes_with_both_durations_and_the_side(
     record = await engine.add_nursing(client, BABY_ID, left_minutes=7, right_minutes=3)
 
     assert isinstance(record, Nursing)
-    assert (record.left_duration, record.right_duration, record.finish_side) == (7, 3, 1)
+    assert (record.left_duration, record.right_duration, record.finish_side) == (7, 3, SIDE_RIGHT)
     assert record.is_detailed == "true"
     assert record.state == 5
 
@@ -795,7 +809,8 @@ BAD_CALLS: dict[str, tuple[str, dict[str, Any]]] = {
     ),
     "naive nursing start": ("add_nursing", {"left_minutes": 5, "start_time": NAIVE}),
     "naive nursing end": ("add_nursing", {"left_minutes": 5, "end_time": NAIVE}),
-    "nursing finish side 2": ("add_nursing", {"left_minutes": 5, "finish_side": 2}),
+    "nursing finish side -1": ("add_nursing", {"left_minutes": 5, "finish_side": -1}),
+    "nursing finish side 3": ("add_nursing", {"left_minutes": 5, "finish_side": 3}),
     "pump with no volume and no length": ("add_pump", {"left_minutes": 0}),
     "negative pump side": (
         "add_pump",
