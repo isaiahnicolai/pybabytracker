@@ -22,6 +22,7 @@ from pybabytracker import (
     encode_transaction,
     format_time,
     from_unix,
+    numeric_code,
     parse_time,
     to_unix,
 )
@@ -263,3 +264,25 @@ def test_an_activity_keeps_its_duration_in_minutes() -> None:
     record = decode_transaction(encode_b64(payload_for("OtherActivity")))
     assert isinstance(record, OtherActivity)
     assert record.duration == 15
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, 1),
+        ("1", 1),
+        ("12", 12),
+        (0, 0),
+        ("0", 0),
+        (True, None),
+        (1.5, None),
+        ("", None),
+        ("-1", None),
+        ("left", None),
+        (None, None),
+    ],
+)
+def test_numeric_codes_read_ints_and_androids_digit_strings(
+    value: Any, expected: int | None
+) -> None:
+    assert numeric_code(value) == expected
