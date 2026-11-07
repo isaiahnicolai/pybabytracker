@@ -34,6 +34,10 @@ async with aiohttp.ClientSession() as session:
 - `AuthenticationError` means the credentials were rejected. `BabyTrackerConnectionError` means
   the service was unreachable or answered with a server error. A 401 mid-session triggers one
   sign-in and a retry before it becomes an `AuthenticationError`.
+- `AccountChangedError` means a sign-in opened a different sync group (`AccountID`) from the one
+  the engine's state came from: the group was reset in the app. The engine saves the first
+  `AccountID` it sees and refuses to sync or write after it changes, as the app does. Start from a
+  new engine to join the new group.
 - Records are typed (`Diaper`, `Sleep`, `Nursing`, and so on). A record type the library
   doesn't know stays raw as an `UnknownRecord` with a logged warning. Decoding then encoding any
   payload returns the same JSON, including keys the library doesn't model.

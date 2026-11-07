@@ -4,6 +4,7 @@ from ._version import __version__
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
+    AccountChangedError,
     AmountTooSmallError,
     AuthenticationError,
     BabyTrackerConnectionError,
@@ -73,6 +74,7 @@ from .times import format_time, from_unix, parse_time, standard_offset_seconds, 
 from .totals import DayTotals, day_totals
 
 __all__ = [
+    "AccountChangedError",
     "Allergen",
     "AmountTooSmallError",
     "ApplyResult",

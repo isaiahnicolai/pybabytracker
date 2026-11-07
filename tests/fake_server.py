@@ -77,6 +77,8 @@ class FakeSyncServer:
         self.post_script: list[str] = []
         self.post_stall = 1.0
         self.base_url = ""
+        # The sync group's AccountID that POST /session answers with (a reset changes it).
+        self.account_id = 424242
 
     # --- test setup helpers -------------------------------------------------
 
@@ -147,7 +149,7 @@ class FakeSyncServer:
             new.os_info = device["DeviceOSInfo"]
         token = secrets.token_hex(8)
         self.sessions[token] = (device["DeviceUUID"], device["DeviceName"], device["DeviceOSInfo"])
-        response = self._json({"AccountID": 424242})
+        response = self._json({"AccountID": self.account_id})
         response.set_cookie("PHPSESSID", token)
         return response
 
