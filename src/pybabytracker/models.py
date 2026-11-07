@@ -36,6 +36,8 @@ _VOLUME = "volume"
 
 # The app's finishSide values for nursing and pumps: 0 is not set, 1 left, 2 right. Synced
 # records agree: left-only sessions carry 1 and right-only ones 2, from iOS and Android alike.
+# A pump with both sides used is usually saved with 0.
+SIDE_NONE = 0
 SIDE_LEFT = 1
 SIDE_RIGHT = 2
 

@@ -30,6 +30,7 @@ from test_writes import (
 
 from pybabytracker import (
     SIDE_LEFT,
+    SIDE_NONE,
     SIDE_RIGHT,
     BabyTrackerClient,
     BabyTrackerConnectionError,
@@ -120,7 +121,7 @@ async def write_pump(engine: SyncEngine, client: BabyTrackerClient, extra: dict[
         right_volume=Volume(5, "oz"),
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_LEFT,
+        finish_side=SIDE_NONE,  # the capture's 0: no side
         time=at("2026-10-26 16:55:15 +0000"),
         timezone_offset=UTC_MINUS_5,
         **extra,
@@ -135,7 +136,7 @@ async def write_nursing(
         BABY_ID,
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_RIGHT,
+        finish_side=SIDE_LEFT,  # the capture's 1
         start_time=at("2026-10-26 16:55:52 +0000"),
         timezone_offset=UTC_MINUS_5,
         **extra,
@@ -291,7 +292,7 @@ async def test_a_metric_pump_equals_the_captured_pump_with_the_metric_flag(
         right_volume=Volume(150, "ml"),
         left_minutes=1,
         right_minutes=1,
-        finish_side=SIDE_LEFT,
+        finish_side=SIDE_NONE,  # the capture's 0: no side
         time=at("2026-10-26 16:55:15 +0000"),
         timezone_offset=UTC_MINUS_5,
     )
@@ -565,6 +566,7 @@ async def test_nursing_with_no_time_ends_now(
         (5, 5, None, SIDE_RIGHT),
         (5, 5, SIDE_LEFT, SIDE_LEFT),
         (5, 0, SIDE_RIGHT, SIDE_RIGHT),
+        (5, 5, SIDE_NONE, SIDE_NONE),
     ],
 )
 async def test_the_finish_side_defaults_to_the_last_side_nursed_and_an_explicit_one_wins(
@@ -807,7 +809,7 @@ BAD_CALLS: dict[str, tuple[str, dict[str, Any]]] = {
     ),
     "naive nursing start": ("add_nursing", {"left_minutes": 5, "start_time": NAIVE}),
     "naive nursing end": ("add_nursing", {"left_minutes": 5, "end_time": NAIVE}),
-    "nursing finish side 0 (not set)": ("add_nursing", {"left_minutes": 5, "finish_side": 0}),
+    "nursing finish side -1": ("add_nursing", {"left_minutes": 5, "finish_side": -1}),
     "nursing finish side 3": ("add_nursing", {"left_minutes": 5, "finish_side": 3}),
     "pump with no volume and no length": ("add_pump", {"left_minutes": 0}),
     "negative pump side": (
