@@ -583,6 +583,18 @@ async def test_the_finish_side_defaults_to_the_last_side_nursed_and_an_explicit_
     assert posted(fake_server)["finishSide"] == expected
 
 
+@pytest.mark.parametrize(("left", "right", "wire"), [(5, 0, 1), (0, 5, 2)])
+async def test_the_finish_side_is_written_as_the_app_numbers_it(
+    left: int, right: int, wire: int, client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    # The app writes 1 for left and 2 for right (0 is not set), so a phone shows the right side.
+    engine = await ready(client, fake_server)
+
+    await engine.add_nursing(client, BABY_ID, left_minutes=left, right_minutes=right)
+
+    assert posted(fake_server)["finishSide"] == wire
+
+
 async def test_a_nursing_record_decodes_with_both_durations_and_the_side(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
@@ -591,7 +603,7 @@ async def test_a_nursing_record_decodes_with_both_durations_and_the_side(
     record = await engine.add_nursing(client, BABY_ID, left_minutes=7, right_minutes=3)
 
     assert isinstance(record, Nursing)
-    assert (record.left_duration, record.right_duration, record.finish_side) == (7, 3, 1)
+    assert (record.left_duration, record.right_duration, record.finish_side) == (7, 3, SIDE_RIGHT)
     assert record.is_detailed == "true"
     assert record.state == 5
 
@@ -795,7 +807,8 @@ BAD_CALLS: dict[str, tuple[str, dict[str, Any]]] = {
     ),
     "naive nursing start": ("add_nursing", {"left_minutes": 5, "start_time": NAIVE}),
     "naive nursing end": ("add_nursing", {"left_minutes": 5, "end_time": NAIVE}),
-    "nursing finish side 2": ("add_nursing", {"left_minutes": 5, "finish_side": 2}),
+    "nursing finish side 0 (not set)": ("add_nursing", {"left_minutes": 5, "finish_side": 0}),
+    "nursing finish side 3": ("add_nursing", {"left_minutes": 5, "finish_side": 3}),
     "pump with no volume and no length": ("add_pump", {"left_minutes": 0}),
     "negative pump side": (
         "add_pump",
