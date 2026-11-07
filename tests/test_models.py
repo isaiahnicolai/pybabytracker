@@ -11,9 +11,11 @@ from factories import ALL_TYPES, BABY_ID, baby_payload, encode_b64, payload_for
 from pybabytracker import (
     Baby,
     Diaper,
+    Milestone,
     Sleep,
     TransactionDecodeError,
     UnknownRecord,
+    Vaccine,
     decode_transaction,
     encode_transaction,
     format_time,
@@ -197,3 +199,29 @@ def test_a_known_type_with_an_unexpected_value_is_kept_raw(overrides: dict[str, 
     assert record.record_type == "Sleep"
     assert record.to_payload() == payload
     assert _round_trip(payload) == payload
+
+
+def test_a_vaccine_and_a_milestone_name_their_embedded_entries() -> None:
+    # Invented entries in the shape the apps embed (a built-in entry's ID starts EasyLogSeed).
+    entry = {"forAge": 0, "desc": "Test description", "newFlage": False}
+    vaccine = decode_transaction(
+        encode_b64(
+            payload_for("Vaccine", vaccineType={**entry, "name": "Test Vaccine", "objectID": "v-1"})
+        )
+    )
+    milestone = decode_transaction(
+        encode_b64(
+            payload_for(
+                "Milestone", milestoneType={**entry, "name": "Test Milestone", "objectID": "m-1"}
+            )
+        )
+    )
+    assert isinstance(vaccine, Vaccine) and vaccine.vaccine_name == "Test Vaccine"
+    assert isinstance(milestone, Milestone) and milestone.milestone_name == "Test Milestone"
+
+
+def test_a_vaccine_and_a_milestone_without_embedded_entries_have_no_name() -> None:
+    vaccine = decode_transaction(encode_b64(payload_for("Vaccine")))
+    milestone = decode_transaction(encode_b64(payload_for("Milestone", milestoneType="?")))
+    assert isinstance(vaccine, Vaccine) and vaccine.vaccine_name is None
+    assert isinstance(milestone, Milestone) and milestone.milestone_name is None

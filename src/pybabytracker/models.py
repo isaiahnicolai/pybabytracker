@@ -429,18 +429,47 @@ class Temperature(Record):
 @_register
 @dataclass(kw_only=True)
 class Vaccine(Record):
+    """A vaccine given. The sync payload embeds the vaccine as ``vaccineType`` (with ``name``,
+    ``desc``, and ``objectID``); the database's ``vaccID`` is kept for payloads that carry it."""
+
     object_type: ClassVar[str] = "Vaccine"
 
+    vaccine_type: dict[str, Any] | None = _opt("vaccineType")
     vacc_id: str | None = _opt("vaccID")
     doc_visit_id: str | None = _opt("docVisitID")
+
+    @property
+    def vaccine_name(self) -> str | None:
+        """The embedded vaccine's name, such as "DTaP"."""
+        return _embedded_name(self.vaccine_type)
 
 
 @_register
 @dataclass(kw_only=True)
 class Milestone(Record):
+    """A milestone reached. The sync payload embeds the milestone as ``milestoneType`` (with
+    ``name``, ``desc``, and ``objectID``); the database's ``milestoneSelectionID`` is kept for
+    payloads that carry it."""
+
     object_type: ClassVar[str] = "Milestone"
 
+    milestone_type: dict[str, Any] | None = _opt("milestoneType")
     milestone_selection_id: str | None = _opt("milestoneSelectionID")
+
+    @property
+    def milestone_name(self) -> str | None:
+        """The embedded milestone's name, such as "First smile"."""
+        return _embedded_name(self.milestone_type)
+
+
+def _embedded_name(selection: Any) -> str | None:
+    """The ``name`` of an embedded list entry, when it has one.
+
+    The apps' built-in entries have IDs that every device shares (``EasyLogSeed`` and a UUID)
+    and are never synced on their own, so the embedded copy is where the name comes from.
+    """
+    name = selection.get("name") if isinstance(selection, dict) else None
+    return name if isinstance(name, str) else None
 
 
 @_register
