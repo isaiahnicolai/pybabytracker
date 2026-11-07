@@ -505,7 +505,9 @@ class Temperature(Record):
         number = _number(measure.get("value"))
         if number is None:
             return None
-        english = measure.get("englishMeasure") in ("true", True)
+        english_measure = measure.get("englishMeasure")
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as Fahrenheit.
+        english = english_measure == "true" or english_measure is True
         return TemperatureReading(number, UNIT_FAHRENHEIT if english else UNIT_CELSIUS)
 
 

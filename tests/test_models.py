@@ -206,7 +206,8 @@ def test_a_known_type_with_an_unexpected_value_is_kept_raw(overrides: dict[str, 
 
 
 @pytest.mark.parametrize(
-    ("english", "unit"), [("true", "F"), (True, "F"), ("false", "C"), (False, "C"), (None, "C")]
+    ("english", "unit"),
+    [("true", "F"), (True, "F"), ("false", "C"), (False, "C"), (None, "C"), (1, "C"), ("1", "C")],
 )
 def test_a_temperature_reads_its_synced_measure(english: Any, unit: str) -> None:
     measure: dict[str, Any] = {"BCObjectType": "TemperatureMeasure", "value": 37.5}
