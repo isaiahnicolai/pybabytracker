@@ -399,13 +399,57 @@ class Sleep(Record):
 @_register
 @dataclass(kw_only=True)
 class Growth(Record):
+    """A growth measurement. The sync payload gives each of ``weight``, ``length``, and ``head`` as
+    a measure, ``{"englishMeasure", "value"}``: pounds or kilograms for the weight, inches or
+    centimeters for the others. A plain number (the app's database columns) is kept as is."""
+
     object_type: ClassVar[str] = "Growth"
 
-    weight: float | None = _opt("weight")
-    length: float | None = _opt("length")
-    head: float | None = _opt("head")
+    weight: dict[str, Any] | float | None = _opt("weight")
+    length: dict[str, Any] | float | None = _opt("length")
+    head: dict[str, Any] | float | None = _opt("head")
     is_english_length_scale: int | None = _opt("isEnglishLengthScale")
     is_english_weight_scale: int | None = _opt("isEnglishWeightScale")
+
+    @property
+    def weight_measurement(self) -> Measurement | None:
+        return _measured(self.weight, UNIT_POUNDS, UNIT_KILOGRAMS)
+
+    @property
+    def length_measurement(self) -> Measurement | None:
+        return _measured(self.length, UNIT_INCHES, UNIT_CENTIMETERS)
+
+    @property
+    def head_measurement(self) -> Measurement | None:
+        return _measured(self.head, UNIT_INCHES, UNIT_CENTIMETERS)
+
+
+UNIT_POUNDS = "lb"
+UNIT_KILOGRAMS = "kg"
+UNIT_INCHES = "in"
+UNIT_CENTIMETERS = "cm"
+
+
+class Measurement(NamedTuple):
+    """A weight or length: a number and its unit (``"lb"``, ``"kg"``, ``"in"``, or ``"cm"``)."""
+
+    value: float
+    unit: str
+
+
+def _measured(measure: Any, english_unit: str, metric_unit: str) -> Measurement | None:
+    """A synced measure's number and unit, or ``None`` when it isn't one or wasn't measured.
+
+    ``englishMeasure`` "true" (or the Android app's ``true``) means the English unit. The app
+    stores a measurement only when it's above zero, so 0 means it wasn't taken.
+    """
+    if not isinstance(measure, dict):
+        return None
+    number = _number(measure.get("value"))
+    if number is None or number <= 0:
+        return None
+    english = measure.get("englishMeasure") in ("true", True)
+    return Measurement(number, english_unit if english else metric_unit)
 
 
 @_register

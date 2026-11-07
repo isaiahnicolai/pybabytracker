@@ -11,6 +11,8 @@ from factories import ALL_TYPES, BABY_ID, baby_payload, encode_b64, payload_for
 from pybabytracker import (
     Baby,
     Diaper,
+    Growth,
+    Measurement,
     Sleep,
     TransactionDecodeError,
     UnknownRecord,
@@ -197,3 +199,26 @@ def test_a_known_type_with_an_unexpected_value_is_kept_raw(overrides: dict[str, 
     assert record.record_type == "Sleep"
     assert record.to_payload() == payload
     assert _round_trip(payload) == payload
+
+
+def test_a_growth_reads_its_synced_measures() -> None:
+    # Shapes as the Android app syncs them (JSON booleans); iOS uses "true" and "false".
+    payload = payload_for(
+        "Growth",
+        weight={"englishMeasure": True, "value": 9.5},
+        length={"englishMeasure": "false", "value": 55.0},
+        head={"englishMeasure": True, "value": 0},
+    )
+    record = decode_transaction(encode_b64(payload))
+    assert isinstance(record, Growth)
+    assert record.weight_measurement == Measurement(9.5, "lb")
+    assert record.length_measurement == Measurement(55.0, "cm")
+    assert record.head_measurement is None  # 0: not measured
+    assert _round_trip(payload) == payload
+
+
+def test_a_growth_with_plain_numbers_has_no_measurements() -> None:
+    record = decode_transaction(encode_b64(payload_for("Growth")))
+    assert isinstance(record, Growth)
+    assert record.weight == 7.5
+    assert (record.weight_measurement, record.length_measurement) == (None, None)
