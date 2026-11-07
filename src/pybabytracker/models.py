@@ -53,8 +53,8 @@ class VolumeMeasure:
 
     The raw object is kept as is, so unknown keys and odd values survive a round trip.
     ``englishMeasure`` "true" means ounces and "false" means milliliters, both observed in captures
-    (2026-10-26; a metric write carries the number as entered). Any other value, or no key, is read
-    as milliliters.
+    (2026-10-26; a metric write carries the number as entered). The Android app sends the JSON
+    booleans ``true`` and ``false`` instead. Any other value, or no key, is read as milliliters.
     """
 
     def __init__(
@@ -86,7 +86,7 @@ class VolumeMeasure:
         number = _number(self.value)
         if number is None:
             return None
-        unit = UNIT_OUNCES if self.english_measure == "true" else UNIT_MILLILITERS
+        unit = UNIT_OUNCES if self.english_measure in ("true", True) else UNIT_MILLILITERS
         return Volume(number, unit)
 
     def to_payload(self) -> dict[str, Any]:
@@ -99,6 +99,22 @@ class VolumeMeasure:
 
     def __repr__(self) -> str:
         return f"VolumeMeasure({self.raw!r})"
+
+
+def numeric_code(value: Any) -> int | None:
+    """A numeric code, such as a diaper's ``status`` or a ``finishSide``, as an int.
+
+    iOS sends these as numbers and the Android app as strings of digits (``"1"``), so both are
+    read; anything else (a bool, a fraction, other text) is ``None``. The record keeps the raw
+    value, so the round trip is unchanged.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return None
 
 
 def _number(value: Any) -> float | None:

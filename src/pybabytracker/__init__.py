@@ -67,6 +67,7 @@ from .models import (
     decode_payload,
     decode_transaction,
     encode_transaction,
+    numeric_code,
 )
 from .timers import NursingTimer, PumpTimer
 from .times import format_time, from_unix, parse_time, standard_offset_seconds, to_unix
@@ -148,6 +149,7 @@ __all__ = [
     "encode_transaction",
     "format_time",
     "from_unix",
+    "numeric_code",
     "parse_time",
     "standard_offset_seconds",
     "to_unix",
