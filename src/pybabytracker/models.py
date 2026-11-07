@@ -34,8 +34,12 @@ _TIME = "time"
 _BABY = "baby"
 _VOLUME = "volume"
 
-SIDE_LEFT = 0
-SIDE_RIGHT = 1
+# The app's finishSide values for nursing and pumps: 0 is not set, 1 left, 2 right. Synced
+# records agree: left-only sessions carry 1 and right-only ones 2, from iOS and Android alike.
+# A pump with both sides used is usually saved with 0.
+SIDE_NONE = 0
+SIDE_LEFT = 1
+SIDE_RIGHT = 2
 
 UNIT_OUNCES = "oz"
 UNIT_MILLILITERS = "ml"
@@ -312,6 +316,15 @@ class Nursing(Record):
 
 @_register
 @dataclass(kw_only=True)
+class NursingSession(Nursing):
+    """A nursing session from the Android app's timer, which syncs under this type name. It
+    has the ``Nursing`` fields plus ``detailed`` and the per-side timestamps, kept in ``extra``."""
+
+    object_type: ClassVar[str] = "NursingSession"
+
+
+@_register
+@dataclass(kw_only=True)
 class Formula(Record):
     object_type: ClassVar[str] = "Formula"
 
@@ -424,6 +437,25 @@ class Medicine(Record):
 
     med_id: str | None = _opt("medID")
     amount: float | None = _opt("amount")
+
+
+@_register
+@dataclass(kw_only=True)
+class Medication(Record):
+    """A dose of a medicine, as the apps sync one. The medicine itself (``name``, ``unit``,
+    ``amountPerTime``, ``interval``, ``objectID``) is embedded as ``medicationSelection``."""
+
+    object_type: ClassVar[str] = "Medication"
+
+    medication_selection: dict[str, Any] | None = _opt("medicationSelection")
+    amount: float | None = _opt("amount")
+
+    @property
+    def medicine_name(self) -> str | None:
+        """The embedded medicine's name, when it has one."""
+        selection = self.medication_selection
+        name = selection.get("name") if isinstance(selection, dict) else None
+        return name if isinstance(name, str) else None
 
 
 @_register

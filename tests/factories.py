@@ -59,6 +59,31 @@ TYPE_FIELDS: dict[str, dict[str, Any]] = {
         "isEnglishWeightScale": 1,
     },
     "Medicine": {"medID": "med-1", "amount": 2.5},
+    "Medication": {
+        "amount": 2.5,
+        "medicationSelection": {
+            "BCObjectType": "MedicationSelection",
+            "objectID": "med-1",
+            "name": "Test Medicine",
+            "unit": "ml",
+            "amountPerTime": 2.5,
+            "interval": 6,
+            "isPresciption": "false",
+            "newFlage": "false",
+            "timestamp": "2026-10-20 08:00:00 +0000",
+        },
+    },
+    "NursingSession": {
+        "finishSide": 1,
+        "leftDuration": 5,
+        "rightDuration": 0,
+        "bothDuration": 0,
+        "detailed": True,
+        "state": 5,
+        "pairSessionState": 0,
+        "leftTimestamps": [],
+        "rightTimestamps": [],
+    },
     "Temperature": {
         "temperature": {
             "BCObjectType": "TemperatureMeasure",

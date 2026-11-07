@@ -35,6 +35,7 @@ from .models import (
     DIAPER_MIXED,
     DIAPER_WET,
     SIDE_LEFT,
+    SIDE_NONE,
     SIDE_RIGHT,
     UNIT_MILLILITERS,
     UNIT_OUNCES,
@@ -129,8 +130,10 @@ def _minutes(value: object, name: str) -> int:
 def _side(finish_side: int | None, left_used: bool, right_used: bool) -> int:
     """The side finished on: as given, else the last side used (right when both were)."""
     if finish_side is not None:
-        if finish_side not in (SIDE_LEFT, SIDE_RIGHT):
-            raise ValueError(f"finish_side must be SIDE_LEFT or SIDE_RIGHT, not {finish_side!r}")
+        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
+            raise ValueError(
+                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
+            )
         return finish_side
     return SIDE_LEFT if left_used and not right_used else SIDE_RIGHT
 
