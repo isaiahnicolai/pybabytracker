@@ -23,6 +23,7 @@ from .exceptions import (
     TransactionDecodeError,
     UnknownBabyError,
     UnknownMilestoneError,
+    UnknownVaccineError,
     ValidationError,
     WriteError,
     WriteOutcomeUnknownError,
@@ -72,6 +73,7 @@ from .models import (
     Temperature,
     UnknownRecord,
     Vaccine,
+    VaccineSelection,
     Volume,
     VolumeMeasure,
     decode_payload,
@@ -79,13 +81,17 @@ from .models import (
     encode_transaction,
     numeric_code,
 )
-from .selections import BUILT_IN_MILESTONES, MilestoneChoice
+from .selections import BUILT_IN_MILESTONES, BUILT_IN_VACCINES, MilestoneChoice, SelectionChoice
 from .timers import NursingTimer, PumpTimer
 from .times import format_time, from_unix, parse_time, standard_offset_seconds, to_unix
 from .totals import DayTotals, day_totals
 
 __all__ = [
     "BUILT_IN_MILESTONES",
+    "BUILT_IN_VACCINES",
+    "SelectionChoice",
+    "UnknownVaccineError",
+    "VaccineSelection",
     "MilestoneChoice",
     "MilestoneSelection",
     "UnknownMilestoneError",

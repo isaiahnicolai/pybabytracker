@@ -45,6 +45,10 @@ class UnknownMilestoneError(WriteError):
     """No milestone with that name or ID is built in or known from sync."""
 
 
+class UnknownVaccineError(WriteError):
+    """No vaccine with that name or ID is built in or known from sync."""
+
+
 class NotOwnRecordError(WriteError):
     """The record wasn't created by this device, so this device may not delete it."""
 

@@ -48,6 +48,7 @@ from .models import (
     Pumped,
     Record,
     Sleep,
+    Vaccine,
     Volume,
     VolumeMeasure,
 )
@@ -200,6 +201,25 @@ def draft_milestone(
         )
 
     return Draft(Milestone, build)
+
+
+def draft_vaccine(
+    selection: Mapping[str, Any],
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Vaccine]:
+    """A vaccine given, embedding the vaccine as ``vaccineType`` (app: ``Vaccine``)."""
+    embedded = dict(selection)
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Vaccine:
+        return Vaccine(
+            **_base(object_id, baby, timestamp, event, tz, text), vaccine_type=dict(embedded)
+        )
+
+    return Draft(Vaccine, build)
 
 
 def draft_bottle[R: (Formula, Pumped)](

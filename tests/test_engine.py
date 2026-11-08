@@ -240,14 +240,15 @@ def test_each_unknown_record_type_is_logged_once(caplog: pytest.LogCaptureFixtur
         tx(n, OP_ADD, {"BCObjectType": "Supplement", "objectID": rid(n)}) for n in range(1, 6)
     ]
     vaccines = [
-        tx(n, OP_ADD, {"BCObjectType": "VaccineSelection", "objectID": rid(n)}) for n in range(6, 9)
+        tx(n, OP_ADD, {"BCObjectType": "OtherFeedSelection", "objectID": rid(n)})
+        for n in range(6, 9)
     ]
     with caplog.at_level(logging.DEBUG, logger="pybabytracker"):
         engine.apply(PHONE, [*medications, *vaccines])
         engine.apply(TABLET, [tx(1, OP_ADD, {"BCObjectType": "Supplement", "objectID": rid(20)})])
     messages = [r.getMessage() for r in caplog.records]
     assert len([m for m in messages if "Supplement" in m]) == 1
-    assert len([m for m in messages if "VaccineSelection" in m]) == 1
+    assert len([m for m in messages if "OtherFeedSelection" in m]) == 1
     # Every record is still kept.
     assert all(isinstance(engine.records[rid(n)], UnknownRecord) for n in (*range(1, 9), 20))
 

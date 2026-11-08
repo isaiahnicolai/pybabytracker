@@ -599,6 +599,19 @@ class MilestoneSelection(Record):
 
 @_register
 @dataclass(kw_only=True)
+class VaccineSelection(Record):
+    """A vaccine a user added to the app's pick list, synced as a transaction of its own (app:
+    ``VaccineSelection``). The built-in vaccines never sync: see ``BUILT_IN_VACCINES``."""
+
+    object_type: ClassVar[str] = "VaccineSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
+
+
+@_register
+@dataclass(kw_only=True)
 class OtherActivity(Record):
     """Any other activity (tummy time, a walk, a bath logged as an activity). The apps sync the
     activity's kind (``name``, ``objectID``) embedded as ``desc``. ``descID`` and ``locationID``
