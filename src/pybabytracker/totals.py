@@ -15,11 +15,15 @@ from .models import (
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
+    SIDE_LEFT,
+    SIDE_NONE,
+    SIDE_RIGHT,
     UNIT_MILLILITERS,
     UNIT_OUNCES,
     Diaper,
     Formula,
     Nursing,
+    Pump,
     Pumped,
     Record,
     Volume,
@@ -42,6 +46,10 @@ class DayTotals:
     bottle_milliliters: float = 0.0
     # The start of the day these totals cover.
     start: datetime | None = None
+    # Nursing sessions (an Android timer's NursingSession included) and their minutes: left,
+    # right, and both sides at once, added up.
+    nursings: int = 0
+    nursing_minutes: int = 0
 
 
 def _milliliters(volume: Volume | None) -> float:
@@ -63,7 +71,7 @@ def day_totals(
     known type it couldn't decode) is an ``UnknownRecord`` and matches none of the classes below.
     A bottle with no amount or no known unit is a feed that adds no volume.
     """
-    diapers = wet = dirty = mixed = feeds = 0
+    diapers = wet = dirty = mixed = feeds = nursings = nursing_minutes = 0
     milliliters = 0.0
     for record in records:
         if record.time is None or record.baby_id != baby_id or not start <= record.time < end:
@@ -76,6 +84,72 @@ def day_totals(
             mixed += status == DIAPER_MIXED
         elif isinstance(record, Nursing | Formula | Pumped):
             feeds += 1
-            if not isinstance(record, Nursing):
+            if isinstance(record, Nursing):
+                nursings += 1
+                nursing_minutes += _session_minutes(record)
+            else:
                 milliliters += _milliliters(record.volume)
-    return DayTotals(diapers, wet, dirty, mixed, feeds, milliliters, start)
+    return DayTotals(
+        diapers, wet, dirty, mixed, feeds, milliliters, start, nursings, nursing_minutes
+    )
+
+
+def _session_minutes(nursing: Nursing) -> int:
+    """A session's minutes on the left, on the right, and on both at once, added up.
+
+    A side that isn't a whole number of minutes (or a string of digits, as Android may send)
+    adds nothing.
+    """
+    sides = (nursing.left_duration, nursing.right_duration, nursing.both_duration)
+    return sum(minutes for side in sides if (minutes := numeric_code(side)) is not None)
+
+
+@dataclass(frozen=True, slots=True)
+class LastBreast:
+    """The newest nursing or pumping session, as the app shows it before the next one.
+
+    ``kind`` is ``"nursing"`` or ``"pump"``. ``side`` is the session's ``finishSide``:
+    ``SIDE_LEFT``, ``SIDE_RIGHT``, or ``SIDE_NONE`` when it has none. The app labels that field
+    as the side a session started on.
+    """
+
+    kind: str
+    side: int
+    time: datetime
+
+
+def last_breast(records: Iterable[Record], now: datetime) -> LastBreast | None:
+    """The newest nursing or pump up to ``now``, whichever baby it was for, as the app picks it.
+
+    The app's nursing and pump screens show this as the last side (app:
+    ``BTDatabaseImple.getLastBreastStateImpleOP``): the newest nursing of any baby (the same
+    mother feeds them all) and the newest pump without a ``label`` (a milk-stash adjustment has
+    one), not after now. The pump wins a tie. ``None`` when there is neither.
+    """
+    newest_nursing: Nursing | None = None
+    newest_pump: Pump | None = None
+    for record in records:
+        if record.time is None or record.time > now:
+            continue
+        if isinstance(record, Nursing):
+            if newest_nursing is None or record.time > newest_nursing.time:  # type: ignore[operator]
+                newest_nursing = record
+        elif (isinstance(record, Pump) and not record.label) and (
+            newest_pump is None or record.time > newest_pump.time  # type: ignore[operator]
+        ):
+            newest_pump = record
+    if newest_nursing is not None and (
+        newest_pump is None or newest_nursing.time > newest_pump.time  # type: ignore[operator]
+    ):
+        chosen: Nursing | Pump = newest_nursing
+        kind = "nursing"
+    elif newest_pump is not None:
+        chosen = newest_pump
+        kind = "pump"
+    else:
+        return None
+    side = numeric_code(chosen.finish_side)
+    if side not in (SIDE_LEFT, SIDE_RIGHT):
+        side = SIDE_NONE
+    assert chosen.time is not None
+    return LastBreast(kind, side, chosen.time)
