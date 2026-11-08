@@ -43,6 +43,10 @@ SIDE_RIGHT = 2
 
 UNIT_OUNCES = "oz"
 UNIT_MILLILITERS = "ml"
+UNIT_POUNDS = "lb"
+UNIT_KILOGRAMS = "kg"
+UNIT_INCHES = "in"
+UNIT_CENTIMETERS = "cm"
 UNIT_FAHRENHEIT = "F"
 UNIT_CELSIUS = "C"
 
@@ -54,11 +58,35 @@ class Volume(NamedTuple):
     unit: str
 
 
-class TemperatureReading(NamedTuple):
-    """A temperature: a number and its unit, ``"F"`` or ``"C"``."""
+class Measurement(NamedTuple):
+    """A weight, a length, or a temperature: a number and its unit (``"lb"``/``"kg"``,
+    ``"in"``/``"cm"``, or ``"F"``/``"C"``)."""
 
     value: float
     unit: str
+
+
+def _measurement(field: Any, is_english_scale: Any, units: tuple[str, str]) -> Measurement | None:
+    """Resolve a growth field: the synced measure ``{"BCObjectType", "englishMeasure", "value"}``,
+    or a plain number with the record's 0/1 scale column (the app's database shape).
+
+    ``units`` is the (US, metric) pair. ``englishMeasure`` "true" (or the Android app's ``true``)
+    means the US unit; anything else is metric. A plain number with no 0 or 1 scale has no unit,
+    so it gives ``None``, as does anything without a number.
+    """
+    english_unit, metric_unit = units
+    if isinstance(field, dict):
+        number = _number(field.get("value"))
+        if number is None:
+            return None
+        english_measure = field.get("englishMeasure")
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as the US unit.
+        english = english_measure == "true" or english_measure is True
+        return Measurement(number, english_unit if english else metric_unit)
+    number = _number(field)
+    if number is None or isinstance(is_english_scale, bool) or is_english_scale not in (0, 1):
+        return None
+    return Measurement(number, english_unit if is_english_scale == 1 else metric_unit)
 
 
 class VolumeMeasure:
@@ -443,13 +471,39 @@ class Sleep(Record):
 @_register
 @dataclass(kw_only=True)
 class Growth(Record):
+    """A growth measurement. The apps sync ``weight`` as a ``WeightMeasure`` and ``length`` and
+    ``head`` as ``LengthMeasure`` objects; the app's database stores plain numbers with
+    ``isEnglishWeightScale`` and ``isEnglishLengthScale``. The fields keep whichever arrived, and
+    the ``*_reading`` properties read both. A value is as sent: the apps store a 32-bit float."""
+
     object_type: ClassVar[str] = "Growth"
 
-    weight: float | None = _opt("weight")
-    length: float | None = _opt("length")
-    head: float | None = _opt("head")
+    weight: dict[str, Any] | float | None = _opt("weight")
+    length: dict[str, Any] | float | None = _opt("length")
+    head: dict[str, Any] | float | None = _opt("head")
     is_english_length_scale: int | None = _opt("isEnglishLengthScale")
     is_english_weight_scale: int | None = _opt("isEnglishWeightScale")
+
+    @property
+    def weight_reading(self) -> Measurement | None:
+        """The weight in pounds or kilograms, or ``None`` when there isn't one."""
+        return _measurement(
+            self.weight, self.is_english_weight_scale, (UNIT_POUNDS, UNIT_KILOGRAMS)
+        )
+
+    @property
+    def length_reading(self) -> Measurement | None:
+        """The length in inches or centimeters, or ``None`` when there isn't one."""
+        return _measurement(
+            self.length, self.is_english_length_scale, (UNIT_INCHES, UNIT_CENTIMETERS)
+        )
+
+    @property
+    def head_reading(self) -> Measurement | None:
+        """The head circumference in inches or centimeters, or ``None`` when there isn't one."""
+        return _measurement(
+            self.head, self.is_english_length_scale, (UNIT_INCHES, UNIT_CENTIMETERS)
+        )
 
 
 @_register
@@ -459,6 +513,12 @@ class Medicine(Record):
 
     med_id: str | None = _opt("medID")
     amount: float | None = _opt("amount")
+
+
+def _selection_name(selection: object) -> str | None:
+    """The ``name`` of an embedded selection object, when it has a string one."""
+    name = selection.get("name") if isinstance(selection, dict) else None
+    return name if isinstance(name, str) else None
 
 
 @_register
@@ -475,67 +535,86 @@ class Medication(Record):
     @property
     def medicine_name(self) -> str | None:
         """The embedded medicine's name, when it has one."""
-        selection = self.medication_selection
-        name = selection.get("name") if isinstance(selection, dict) else None
-        return name if isinstance(name, str) else None
+        return _selection_name(self.medication_selection)
 
 
 @_register
 @dataclass(kw_only=True)
 class Temperature(Record):
+    """A temperature. The apps sync it as ``temperature``, a ``TemperatureMeasure``; the app's
+    database stores ``temp`` with ``isEnglishScale``. ``reading`` reads either. The value is as
+    sent: the apps store a 32-bit float, so 100.4 can arrive as 100.4000015258789."""
+
     object_type: ClassVar[str] = "Temperature"
 
-    # The sync payload's reading: {"BCObjectType": "TemperatureMeasure", "value", "englishMeasure"}.
     temperature: dict[str, Any] | None = _opt("temperature")
-    # The app's database columns, kept for payloads that carry them.
     temp: float | None = _opt("temp")
     is_english_scale: int | None = _opt("isEnglishScale")
 
     @property
-    def reading(self) -> TemperatureReading | None:
-        """The synced reading, or ``None`` when there isn't one with a number.
-
-        ``englishMeasure`` "true" (or the Android app's ``true``) means Fahrenheit; anything else
-        is Celsius. The value is as sent: the apps store it as a 32-bit float, so 100.4 can
-        arrive as 100.4000015258789.
-        """
-        measure = self.temperature
-        if not isinstance(measure, dict):
-            return None
-        number = _number(measure.get("value"))
-        if number is None:
-            return None
-        english_measure = measure.get("englishMeasure")
-        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as Fahrenheit.
-        english = english_measure == "true" or english_measure is True
-        return TemperatureReading(number, UNIT_FAHRENHEIT if english else UNIT_CELSIUS)
+    def reading(self) -> Measurement | None:
+        """The temperature in Fahrenheit or Celsius, or ``None`` when there isn't one."""
+        units = (UNIT_FAHRENHEIT, UNIT_CELSIUS)
+        if self.temperature is not None:
+            return _measurement(self.temperature, None, units)
+        return _measurement(self.temp, self.is_english_scale, units)
 
 
 @_register
 @dataclass(kw_only=True)
 class Vaccine(Record):
+    """A vaccine given. The apps sync the vaccine itself (``name``, ``forAge``, ``objectID``)
+    embedded as ``vaccineType``. ``vaccID`` and ``docVisitID`` are the local database's columns."""
+
     object_type: ClassVar[str] = "Vaccine"
 
+    vaccine_type: dict[str, Any] | None = _opt("vaccineType")
     vacc_id: str | None = _opt("vaccID")
     doc_visit_id: str | None = _opt("docVisitID")
+
+    @property
+    def vaccine_name(self) -> str | None:
+        """The embedded vaccine's name, when it has one."""
+        return _selection_name(self.vaccine_type)
 
 
 @_register
 @dataclass(kw_only=True)
 class Milestone(Record):
+    """A milestone reached. The apps sync the milestone itself (``name``, ``forAge``,
+    ``objectID``) embedded as ``milestoneType``. ``milestoneSelectionID`` is the local database's
+    column."""
+
     object_type: ClassVar[str] = "Milestone"
 
+    milestone_type: dict[str, Any] | None = _opt("milestoneType")
+    has_new_type: bool | str | None = _opt("hasNewType")
     milestone_selection_id: str | None = _opt("milestoneSelectionID")
+
+    @property
+    def milestone_name(self) -> str | None:
+        """The embedded milestone's name, when it has one."""
+        return _selection_name(self.milestone_type)
 
 
 @_register
 @dataclass(kw_only=True)
 class OtherActivity(Record):
+    """Any other activity (tummy time, a walk, a bath logged as an activity). The apps sync the
+    activity's kind (``name``, ``objectID``) embedded as ``desc``. ``descID`` and ``locationID``
+    are the local database's columns."""
+
     object_type: ClassVar[str] = "OtherActivity"
 
+    desc: dict[str, Any] | None = _opt("desc")
     desc_id: str | None = _opt("descID")
     location_id: str | None = _opt("locationID")
     duration: int | None = _opt("duration")
+
+    @property
+    def activity_name(self) -> str | None:
+        """The embedded activity kind's name, when it has one."""
+        return _selection_name(self.desc)
 
 
 @_register
