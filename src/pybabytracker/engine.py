@@ -86,6 +86,7 @@ from .builders import (
     Draft,
     draft_bottle,
     draft_diaper,
+    draft_milestone,
     draft_nursing,
     draft_pump,
     draft_sleep,
@@ -106,6 +107,7 @@ from .exceptions import (
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownBabyError,
+    UnknownMilestoneError,
     WriteOutcomeUnknownError,
     WrongRecordTypeError,
 )
@@ -118,6 +120,8 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Milestone,
+    MilestoneSelection,
     Nursing,
     Pump,
     Pumped,
@@ -129,6 +133,7 @@ from .models import (
     decode_transaction,
     encode_transaction,
 )
+from .selections import BUILT_IN_MILESTONES, MilestoneChoice, choice_from_selection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -329,6 +334,81 @@ class SyncEngine:
         """
         draft = draft_diaper(status, time=time, timezone_offset=timezone_offset, note=note)
         return await self._add(target, baby_id, draft, object_id)
+
+    async def add_milestone(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        milestone: str,
+        *,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Milestone:
+        """Post a milestone the baby reached, and apply it locally.
+
+        ``milestone`` is a name or ID from ``milestone_choices(baby_id)``: one the app ships
+        with, or one added in the app and known from sync. A name matches ignoring case and
+        surrounding spaces. The record embeds that milestone as the app does. A milestone that
+        isn't known raises ``UnknownMilestoneError`` before any request; adding a new one to the
+        pick list isn't supported yet. The other arguments work as for ``add_diaper``.
+        """
+        choice = self.find_milestone(milestone, baby_id)
+        draft = draft_milestone(
+            choice.selection, time=time, timezone_offset=timezone_offset, note=note
+        )
+        return await self._add(target, baby_id, draft, object_id)
+
+    def milestone_choices(self, baby_id: str | None = None) -> list[MilestoneChoice]:
+        """Every milestone a record for the baby can name.
+
+        The app's built-in milestones come first, in its order, then the ones added in the app,
+        by name. A milestone added for one baby only is left out for the others; with no
+        ``baby_id``, all are listed. A synced or already-used copy of a milestone replaces the
+        built-in template, so a record embeds what the app has.
+        """
+        found: dict[str, MilestoneChoice] = {c.object_id: c for c in BUILT_IN_MILESTONES}
+        for record in self._records.values():
+            if isinstance(record, Milestone):
+                choice = choice_from_selection(record.milestone_type)
+            elif isinstance(record, MilestoneSelection):
+                if baby_id is not None and record.baby_id and record.baby_id != baby_id:
+                    continue
+                choice = choice_from_selection(record.to_payload())
+            else:
+                continue
+            if choice is None or (
+                isinstance(record, Milestone)
+                and choice.object_id in found
+                and not found[choice.object_id].built_in
+            ):
+                continue
+            built_in = choice.object_id in found and found[choice.object_id].built_in
+            found[choice.object_id] = MilestoneChoice(
+                choice.object_id, choice.name, built_in, choice.selection
+            )
+        built_ins = [c for c in found.values() if c.built_in]
+        order = {c.object_id: i for i, c in enumerate(BUILT_IN_MILESTONES)}
+        built_ins.sort(key=lambda c: order.get(c.object_id, len(order)))
+        added = sorted(
+            (c for c in found.values() if not c.built_in), key=lambda c: c.name.casefold()
+        )
+        return built_ins + added
+
+    def find_milestone(self, milestone: str, baby_id: str | None = None) -> MilestoneChoice:
+        """The milestone with that ID, or else that name; ``UnknownMilestoneError`` without one."""
+        if not isinstance(milestone, str) or not milestone.strip():
+            raise ValueError("milestone must be a name or an ID")
+        wanted = milestone.strip()
+        choices = self.milestone_choices(baby_id)
+        for choice in choices:
+            if choice.object_id.casefold() == wanted.casefold():
+                return choice
+        for choice in choices:
+            if choice.name.strip().casefold() == wanted.casefold():
+                return choice
+        raise UnknownMilestoneError(f"no milestone {milestone!r} is built in or known from sync")
 
     async def add_formula(
         self,

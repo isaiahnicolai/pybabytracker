@@ -663,6 +663,22 @@ class Milestone(Record):
 
 @_register
 @dataclass(kw_only=True)
+class MilestoneSelection(Record):
+    """A milestone a user added to the app's pick list, synced as a transaction of its own (app:
+    ``MilestoneSelection``). ``babyID`` is set when it was added for one baby only; it stays in
+    ``extra``, where ``baby_id`` reads it. The built-in milestones never sync: see
+    ``BUILT_IN_MILESTONES``."""
+
+    object_type: ClassVar[str] = "MilestoneSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
+    used: bool | str | None = _opt("used")
+
+
+@_register
+@dataclass(kw_only=True)
 class OtherActivity(Record):
     """Any other activity (tummy time, a walk, a bath logged as an activity). The apps sync the
     activity's kind (``name``, ``objectID``) embedded as ``desc``. ``descID`` and ``locationID``
