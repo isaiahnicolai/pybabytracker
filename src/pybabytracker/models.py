@@ -51,6 +51,62 @@ UNIT_FAHRENHEIT = "F"
 UNIT_CELSIUS = "C"
 
 
+MEDIA_PHOTO = 0
+MEDIA_VIDEO = 1
+
+
+class Picture(NamedTuple):
+    """A picture attached to a record (one entry of its ``pictureNote``).
+
+    ``file_name`` is the entry's ``fileName``. ``file`` is the photo or video on the service and
+    ``thumbnail_file`` its thumbnail, both for ``BabyTrackerClient.get_picture``. A record
+    picture's photo file (``fileName`` plus ".jpg") was seen in synced data and downloaded. These
+    are the expected shape, not yet seen in synced data: the ".mp4" file for a video
+    (``MEDIA_VIDEO``), the "__thumbnail.jpg" thumbnail, and a ``mediaType`` sent as a digit
+    string. ``file`` is ``None`` for a media type other than a photo or a video.
+    """
+
+    object_id: str | None
+    file_name: str
+    media_type: int | None
+    file: str | None
+    thumbnail_file: str
+
+
+def _is_deleted(value: object) -> bool:
+    """Whether a ``deleted`` flag is set: "true" or a real bool. 1 and "1" count too, an
+    expected shape, not yet seen in synced data."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1")
+    return value == 1
+
+
+def _picture(entry: object) -> Picture | None:
+    """A ``pictureNote`` entry, or ``None`` when it's deleted or has no usable ``fileName``."""
+    if not isinstance(entry, dict):
+        return None
+    if _is_deleted(entry.get("deleted")):
+        return None
+    file_name = entry.get("fileName")
+    if not isinstance(file_name, str) or not is_plain_file_name(file_name):
+        return None
+    # A number, or a digit string ("0") that Android is expected to send.
+    media_type = numeric_code(entry.get("mediaType"))
+    extension = (
+        {MEDIA_PHOTO: ".jpg", MEDIA_VIDEO: ".mp4"}.get(media_type)
+        if media_type is not None
+        else None
+    )
+    object_id = entry.get("objectID")
+    return Picture(
+        object_id=object_id if isinstance(object_id, str) else None,
+        file_name=file_name,
+        media_type=media_type,
+        file=file_name + extension if extension else None,
+        thumbnail_file=file_name + "__thumbnail.jpg",
+    )
+
+
 class Volume(NamedTuple):
     """An amount of liquid: a number and its unit, ``"oz"`` or ``"ml"``."""
 
@@ -185,6 +241,30 @@ def _volume_of(amount: Any, is_english_scale: Any) -> Volume | None:
     return None
 
 
+def is_plain_file_name(name: object) -> bool:
+    """Whether ``name`` is a string with some visible text and no path in it.
+
+    File names come from other devices' records, so a name that is empty, only whitespace, has a
+    path separator, or is "." or ".." is never used to build a request.
+    """
+    return (
+        isinstance(name, str)
+        and bool(name.strip())
+        and "/" not in name
+        and "\\" not in name
+        and name not in (".", "..")
+    )
+
+
+def _picture_stem(name: object) -> str | None:
+    """A ``pictureName`` without a ".jpg" extension, or ``None`` when it isn't a plain file name
+    or nothing is left once the extension is gone."""
+    if not isinstance(name, str) or not is_plain_file_name(name):
+        return None
+    stem = name[:-4] if name.lower().endswith(".jpg") else name
+    return stem if is_plain_file_name(stem) else None
+
+
 def _key(name: str, codec: str | None = None) -> Any:
     """An optional payload field stored under ``name``."""
     return field(default=None, metadata={"key": name, "codec": codec})
@@ -215,6 +295,12 @@ class Record:
     @property
     def record_type(self) -> str:
         return self.object_type
+
+    @property
+    def pictures(self) -> list[Picture]:
+        """The pictures attached to the record, leaving out deleted ones and unusable entries."""
+        entries = self.picture_note if isinstance(self.picture_note, list) else []
+        return [picture for entry in entries if (picture := _picture(entry)) is not None]
 
     @property
     def baby_id(self) -> str | None:
@@ -334,6 +420,24 @@ class Baby(Record):
     due_day: str | None = _opt("dueDay")
     gender: str | None = _opt("gender")
     picture_name: str | None = _opt("pictureName")
+
+    @property
+    def picture_file(self) -> str | None:
+        """The photo's file on the service, ``pictureName`` plus ".jpg", or ``None`` when the baby
+        has no photo. A name that already ends in ".jpg" is used as it is. Pass it to
+        ``BabyTrackerClient.get_picture``. The file was seen in synced data and downloaded."""
+        stem = _picture_stem(self.picture_name)
+        if stem is None or self.picture_name is None:
+            return None
+        return self.picture_name if self.picture_name.lower().endswith(".jpg") else f"{stem}.jpg"
+
+    @property
+    def landscape_picture_file(self) -> str | None:
+        """The landscape crop's file, ``pictureName`` plus "_l.jpg", or ``None`` when the baby has
+        no photo. Expected, not yet seen in synced data: that the service has this file, and that
+        every baby with a photo has one."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}_l.jpg" if stem else None
 
 
 @_register
