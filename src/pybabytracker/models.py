@@ -49,6 +49,52 @@ UNIT_INCHES = "in"
 UNIT_CENTIMETERS = "cm"
 
 
+MEDIA_PHOTO = 0
+MEDIA_VIDEO = 1
+
+
+class Picture(NamedTuple):
+    """A picture attached to a record (one entry of its ``pictureNote``).
+
+    ``file`` is the photo or video on the service and ``thumbnail_file`` its thumbnail, both
+    for ``BabyTrackerClient.get_picture`` (app: ``Picture.getFileFullName``,
+    ``getThumbnailFullName``). ``file`` is ``None`` for a media type other than a photo or a
+    video. The app writes the thumbnail from what it showed on screen, so it has no fixed size.
+    """
+
+    object_id: str | None
+    file_name: str
+    media_type: int | None
+    file: str | None
+    thumbnail_file: str
+
+
+def _picture(entry: object) -> Picture | None:
+    """A ``pictureNote`` entry, or ``None`` when it's deleted or has no usable ``fileName``."""
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("deleted") in ("true", True):
+        return None
+    file_name = entry.get("fileName")
+    if not isinstance(file_name, str) or not _is_plain_name(file_name):
+        return None
+    # iOS may send the media type as a number and Android as a digit string ("0").
+    media_type = numeric_code(entry.get("mediaType"))
+    extension = (
+        {MEDIA_PHOTO: ".jpg", MEDIA_VIDEO: ".mp4"}.get(media_type)
+        if media_type is not None
+        else None
+    )
+    object_id = entry.get("objectID")
+    return Picture(
+        object_id=object_id if isinstance(object_id, str) else None,
+        file_name=file_name,
+        media_type=media_type,
+        file=file_name + extension if extension else None,
+        thumbnail_file=file_name + "__thumbnail.jpg",
+    )
+
+
 class Volume(NamedTuple):
     """An amount of liquid: a number and its unit, ``"oz"`` or ``"ml"``."""
 
@@ -182,6 +228,20 @@ def _volume_of(amount: Any, is_english_scale: Any) -> Volume | None:
     return None
 
 
+def _is_plain_name(name: str) -> bool:
+    """Whether ``name`` is a file name with no path in it. Names come from other devices."""
+    return bool(name) and "/" not in name and "\\" not in name and name not in (".", "..")
+
+
+def _picture_stem(name: object) -> str | None:
+    """A ``pictureName`` without a ".jpg" an older app may have kept, or ``None`` when it's empty
+    or isn't a plain file name."""
+    if not isinstance(name, str) or not _is_plain_name(name):
+        return None
+    stem = name[:-4] if name.lower().endswith(".jpg") else name
+    return stem if _is_plain_name(stem) else None
+
+
 def _key(name: str, codec: str | None = None) -> Any:
     """An optional payload field stored under ``name``."""
     return field(default=None, metadata={"key": name, "codec": codec})
@@ -212,6 +272,12 @@ class Record:
     @property
     def record_type(self) -> str:
         return self.object_type
+
+    @property
+    def pictures(self) -> list[Picture]:
+        """The pictures attached to the record, leaving out deleted ones and unusable entries."""
+        entries = self.picture_note if isinstance(self.picture_note, list) else []
+        return [picture for entry in entries if (picture := _picture(entry)) is not None]
 
     @property
     def baby_id(self) -> str | None:
@@ -331,6 +397,20 @@ class Baby(Record):
     due_day: str | None = _opt("dueDay")
     gender: str | None = _opt("gender")
     picture_name: str | None = _opt("pictureName")
+
+    @property
+    def picture_file(self) -> str | None:
+        """The photo's file on the service, ``pictureName`` plus ".jpg" (app: ``Baby``), or
+        ``None`` when the baby has no photo. Pass it to ``BabyTrackerClient.get_picture``."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}.jpg" if stem else None
+
+    @property
+    def landscape_picture_file(self) -> str | None:
+        """The landscape crop's file, ``pictureName`` plus "_l.jpg" (app:
+        ``Baby.getPictureLandscapeFile``). Not every baby with a photo has one."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}_l.jpg" if stem else None
 
 
 @_register

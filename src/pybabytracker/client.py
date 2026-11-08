@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Self
@@ -201,6 +202,21 @@ class BabyTrackerClient:
             expect_json=False,
         )
 
+    async def get_picture(self, file_name: str) -> bytes | None:
+        """Download a picture file, such as a baby's photo (``Baby.picture_file``).
+
+        Returns ``None`` when the service doesn't have the file. It answers ``400`` for that (seen
+        for a picture's ".mp4" name when the picture is a photo), so ``400`` and ``404`` both
+        mean no file. A name with a path
+        separator, or none at all, raises ``ValueError`` without a request: names come from
+        other devices' records.
+        """
+        if not file_name or "/" in file_name or "\\" in file_name or file_name in (".", ".."):
+            raise ValueError(f"not a picture file name: {file_name!r}")
+        path = f"/account/picture/{quote(file_name, safe='')}"
+        status, content = await self._authorized(lambda: self._send_bytes(path), allow=(400, 404))
+        return None if status in (400, 404) else content
+
     async def _request(
         self, method: str, path: str, body: Any = None, *, expect_json: bool = True
     ) -> Any:
@@ -209,16 +225,27 @@ class BabyTrackerClient:
         A 401 means the session expired: sign in again once and retry. A second 401 raises.
         With ``expect_json`` false, any 2xx answer counts and its body is ignored.
         """
+        _, text = await self._authorized(lambda: self._send(method, path, body))
+        return _parse_json(text) if expect_json else None
+
+    async def _authorized[T](
+        self, send: Callable[[], Awaitable[tuple[int, T]]], *, allow: tuple[int, ...] = ()
+    ) -> tuple[int, T]:
+        """Run ``send`` with a session, signing in again once on a 401.
+
+        A status in ``allow`` is returned as is; any other error status raises.
+        """
         if not self._signed_in:
             async with self._sign_in_lock:
                 if not self._signed_in:
                     await self._sign_in()
         for attempt in range(2):
             generation = self._generation
-            status, text = await self._send(method, path, body)
+            status, content = await send()
             if status != 401:
-                _raise_for_status(status)
-                return _parse_json(text) if expect_json else None
+                if status not in allow:
+                    _raise_for_status(status)
+                return status, content
             if attempt == 1:
                 self._signed_in = False
                 break
@@ -229,6 +256,18 @@ class BabyTrackerClient:
         raise AuthenticationError("the service rejected the session even after signing in again")
 
     async def _send(self, method: str, path: str, body: Any = None) -> tuple[int, str]:
+        return await self._exchange(method, path, body, lambda response: response.text())
+
+    async def _send_bytes(self, path: str) -> tuple[int, bytes]:
+        return await self._exchange("GET", path, None, lambda response: response.read())
+
+    async def _exchange[T](
+        self,
+        method: str,
+        path: str,
+        body: Any,
+        read: Callable[[aiohttp.ClientResponse], Awaitable[T]],
+    ) -> tuple[int, T]:
         if self._session is None:
             self._session = aiohttp.ClientSession(
                 cookie_jar=aiohttp.CookieJar(unsafe=self._unsafe_cookie_jar)
@@ -241,7 +280,7 @@ class BabyTrackerClient:
                 headers={"User-Agent": USER_AGENT},
                 timeout=self._timeout,
             ) as response:
-                return response.status, await response.text()
+                return response.status, await read(response)
         except aiohttp.ClientConnectorError as err:
             # No connection was made, so the request never reached the service.
             raise BabyTrackerConnectionError(f"could not reach the service: {err!r}") from err

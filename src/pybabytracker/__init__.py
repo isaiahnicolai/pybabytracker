@@ -31,6 +31,8 @@ from .models import (
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
+    MEDIA_PHOTO,
+    MEDIA_VIDEO,
     OP_ADD,
     OP_DELETE,
     OP_UPDATE,
@@ -62,6 +64,7 @@ from .models import (
     NursingSession,
     OtherActivity,
     OtherFeed,
+    Picture,
     Pump,
     Pumped,
     Record,
@@ -82,6 +85,9 @@ from .times import format_time, from_unix, parse_time, standard_offset_seconds, 
 from .totals import DayTotals, day_totals
 
 __all__ = [
+    "MEDIA_PHOTO",
+    "MEDIA_VIDEO",
+    "Picture",
     "Allergen",
     "AmountTooSmallError",
     "ApplyResult",
