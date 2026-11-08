@@ -1,4 +1,4 @@
-"""The app's milestone pick list: the milestones it ships with, and how a record names one.
+"""The app's pick lists: the milestones and vaccines it ships with, and how a record names one.
 
 A ``Milestone`` record embeds the milestone it marks (a ``MilestoneSelection``) as
 ``milestoneType``. The built-in milestones aren't on the service: every app seeds them locally
@@ -9,7 +9,7 @@ to match it. Milestones a user adds sync as ``MilestoneSelection`` transactions 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,8 +59,9 @@ _BUILT_IN_MILESTONES: tuple[tuple[str, str, str], ...] = (
 
 
 @dataclass(frozen=True, slots=True)
-class MilestoneChoice:
-    """A milestone a record can name: its ID, its name, and the object a record embeds."""
+class SelectionChoice:
+    """An entry of a pick list a record can name (a milestone, a vaccine, a medicine): its ID,
+    its name, whether the app ships it, and the object a record embeds."""
 
     object_id: str
     name: str
@@ -68,34 +69,109 @@ class MilestoneChoice:
     selection: Mapping[str, Any] = field(compare=False, repr=False)
 
 
-def _built_in(object_id: str, name: str, desc: str) -> MilestoneChoice:
-    return MilestoneChoice(
+# A milestone choice; the name is kept for the milestone API.
+MilestoneChoice = SelectionChoice
+
+# The app's built-in vaccines, in its order: ID, short name, and full name. The app seeds every
+# one with forAge 0.
+_BUILT_IN_VACCINES: tuple[tuple[str, str, str], ...] = (
+    ("EasyLogSeed001ddeae8f0-8805-11e2-9e96-0800200c9a66", "HepB", "Hepatitis B"),
+    ("EasyLogSeed002e733ec90-8805-11e2-9e96-0800200c9a66", "RV", "Rotavirus"),
+    (
+        "EasyLogSeed003effe4a50-8805-11e2-9e96-0800200c9a66",
+        "DTaP",
+        "Diphtheria, Tetanus, Pertussis",
+    ),
+    (
+        "EasyLogSeed004f8ab3500-8805-11e2-9e96-0800200c9a66",
+        "Hib",
+        "Haemophilus influenzae type b",
+    ),
+    ("EasyLogSeed0050051d340-8806-11e2-9e96-0800200c9a66", "PCV", "Pneumococcal"),
+    ("EasyLogSeed0060838fcf0-8806-11e2-9e96-0800200c9a66", "IPV", "Inactivated Poliovirus"),
+    ("EasyLogSeed007132f8980-8806-11e2-9e96-0800200c9a66", "Influenza", "Influenza"),
+    ("EasyLogSeed0081d5383d0-8806-11e2-9e96-0800200c9a66", "MMR", "Measles, Mumps, Rubella"),
+    ("EasyLogSeed00925268940-8806-11e2-9e96-0800200c9a66", "Varicella", "Varicella"),
+    ("EasyLogSeed0102d1f1810-8806-11e2-9e96-0800200c9a66", "Hep A", "Hepatitis A"),
+)
+
+
+def _seed(object_type: str, object_id: str, name: str, desc: str, **extra: Any) -> SelectionChoice:
+    """A built-in entry as the app seeds it, in the shape a record embeds."""
+    return SelectionChoice(
         object_id=object_id,
         name=name,
         built_in=True,
         selection={
-            "BCObjectType": "MilestoneSelection",
+            "BCObjectType": object_type,
             "objectID": object_id,
             "name": name,
             "desc": desc,
-            "forAge": 0,
-            "used": "false",
+            **extra,
             "newFlage": "false",
             "timestamp": _SEED_TIMESTAMP,
         },
     )
 
 
-BUILT_IN_MILESTONES: tuple[MilestoneChoice, ...] = tuple(
-    _built_in(*row) for row in _BUILT_IN_MILESTONES
+BUILT_IN_MILESTONES: tuple[SelectionChoice, ...] = tuple(
+    _seed("MilestoneSelection", *row, forAge=0, used="false") for row in _BUILT_IN_MILESTONES
+)
+
+BUILT_IN_VACCINES: tuple[SelectionChoice, ...] = tuple(
+    _seed("VaccineSelection", *row, forAge=0) for row in _BUILT_IN_VACCINES
 )
 
 
-def choice_from_selection(selection: object, *, built_in: bool = False) -> MilestoneChoice | None:
-    """A choice for a ``MilestoneSelection`` object, or ``None`` without a string ID and name."""
+def choice_from_selection(selection: object, *, built_in: bool = False) -> SelectionChoice | None:
+    """A choice for a selection object, or ``None`` without a string ID and name."""
     if not isinstance(selection, Mapping):
         return None
     object_id, name = selection.get("objectID"), selection.get("name")
     if not isinstance(object_id, str) or not object_id or not isinstance(name, str):
         return None
-    return MilestoneChoice(object_id, name, built_in, dict(selection))
+    return SelectionChoice(object_id, name, built_in, dict(selection))
+
+
+def merged_choices(
+    built_ins: Iterable[SelectionChoice],
+    embedded: Iterable[object],
+    synced: Iterable[object],
+) -> list[SelectionChoice]:
+    """The entries a record can name: the built-ins, in the app's order, then the rest by name.
+
+    ``embedded`` are selection objects records already carry; ``synced`` are selections synced
+    as records of their own. A copy of a built-in replaces its template (keeping it first), so
+    a record embeds what the app has; a synced copy wins over an embedded one.
+    """
+    order = {choice.object_id: i for i, choice in enumerate(built_ins)}
+    found: dict[str, SelectionChoice] = {}
+    for built_in in built_ins:
+        found[built_in.object_id] = built_in
+    for source, overrides_added in ((embedded, False), (synced, True)):
+        for selection in source:
+            copy = choice_from_selection(selection)
+            if copy is None:
+                continue
+            current = found.get(copy.object_id)
+            if current is not None and not current.built_in and not overrides_added:
+                continue
+            found[copy.object_id] = SelectionChoice(
+                copy.object_id, copy.name, copy.object_id in order, copy.selection
+            )
+    built = sorted((c for c in found.values() if c.built_in), key=lambda c: order[c.object_id])
+    added = sorted((c for c in found.values() if not c.built_in), key=lambda c: c.name.casefold())
+    return built + added
+
+
+def find_choice(choices: Iterable[SelectionChoice], wanted: str) -> SelectionChoice | None:
+    """The entry with that ID, or else that name, ignoring case and surrounding spaces."""
+    listed = list(choices)
+    key = wanted.strip().casefold()
+    for choice in listed:
+        if choice.object_id.casefold() == key:
+            return choice
+    for choice in listed:
+        if choice.name.strip().casefold() == key:
+            return choice
+    return None

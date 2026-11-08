@@ -87,12 +87,16 @@ key.
 | `add_sleep(client, baby_id, start=, end=, ...)` | `Sleep` | a finished sleep |
 | `add_pump(client, amount=, ...)` or `add_pump(client, left_volume=, right_volume=, ...)` | `Pump` | a pumping session; belongs to the account, so no `baby_id` |
 | `add_milestone(client, baby_id, milestone, ...)` | `Milestone` | `milestone` is a name or ID from `milestone_choices(baby_id)` |
+| `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
+| `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
   in the app and known from sync. `milestone_choices(baby_id)` lists them and `find_milestone`
   resolves a name (ignoring case) or ID; an unknown one raises `UnknownMilestoneError` before any
-  request. Adding a new milestone to the pick list isn't supported yet.
+  request. Adding a new milestone to the pick list isn't supported yet. Vaccines work the same
+  way: the app's 10 built-ins (`BUILT_IN_VACCINES`) plus synced ones, `vaccine_choices()`,
+  `find_vaccine`, and `UnknownVaccineError`.
 - Volumes are `Volume(value, "oz")` or `Volume(value, "ml")`, written as a `VolumeMeasure` with
   `englishMeasure` `"true"` (ounces) or `"false"` (milliliters), rounded to 2 decimals (an integer
   when whole). The number is written as given, with no conversion, as the app does.

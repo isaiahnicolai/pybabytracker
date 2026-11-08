@@ -22,7 +22,9 @@ from .exceptions import (
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownBabyError,
+    UnknownMedicineError,
     UnknownMilestoneError,
+    UnknownVaccineError,
     ValidationError,
     WriteError,
     WriteOutcomeUnknownError,
@@ -59,6 +61,7 @@ from .models import (
     Joy,
     Measurement,
     Medication,
+    MedicationSelection,
     Medicine,
     Milestone,
     MilestoneSelection,
@@ -75,6 +78,7 @@ from .models import (
     Temperature,
     UnknownRecord,
     Vaccine,
+    VaccineSelection,
     Volume,
     VolumeMeasure,
     decode_payload,
@@ -82,7 +86,7 @@ from .models import (
     encode_transaction,
     numeric_code,
 )
-from .selections import BUILT_IN_MILESTONES, MilestoneChoice
+from .selections import BUILT_IN_MILESTONES, BUILT_IN_VACCINES, MilestoneChoice, SelectionChoice
 from .timers import NursingTimer, PumpTimer
 from .times import format_time, from_unix, parse_time, standard_offset_seconds, to_unix
 from .totals import DayTotals, day_totals
@@ -92,6 +96,12 @@ __all__ = [
     "MEDIA_VIDEO",
     "Picture",
     "BUILT_IN_MILESTONES",
+    "BUILT_IN_VACCINES",
+    "MedicationSelection",
+    "UnknownMedicineError",
+    "SelectionChoice",
+    "UnknownVaccineError",
+    "VaccineSelection",
     "MilestoneChoice",
     "MilestoneSelection",
     "UnknownMilestoneError",

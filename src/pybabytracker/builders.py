@@ -42,12 +42,14 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Medication,
     Milestone,
     Nursing,
     Pump,
     Pumped,
     Record,
     Sleep,
+    Vaccine,
     Volume,
     VolumeMeasure,
 )
@@ -200,6 +202,59 @@ def draft_milestone(
         )
 
     return Draft(Milestone, build)
+
+
+def draft_medication(
+    selection: Mapping[str, Any],
+    amount: float | None,
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Medication]:
+    """A dose of a medicine: ``amount`` in its unit (default its ``amountPerTime``), with the
+    medicine embedded as ``medicationSelection`` (app: ``Medication``)."""
+    embedded = dict(selection)
+    if amount is None:
+        amount = embedded.get("amountPerTime")
+        if amount is None:
+            raise ValueError("this medicine has no usual dose, so give an amount")
+    if isinstance(amount, bool) or not isinstance(amount, int | float) or not math.isfinite(amount):
+        raise ValueError("a dose's amount must be a finite number")
+    if amount <= 0:
+        raise ValueError("a dose's amount must be more than zero")
+    dose = _number(amount)
+    if dose <= 0:
+        raise ValueError("a dose's amount must be more than zero")  # also after rounding
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Medication:
+        return Medication(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            amount=dose,
+            medication_selection=dict(embedded),
+        )
+
+    return Draft(Medication, build)
+
+
+def draft_vaccine(
+    selection: Mapping[str, Any],
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Vaccine]:
+    """A vaccine given, embedding the vaccine as ``vaccineType`` (app: ``Vaccine``)."""
+    embedded = dict(selection)
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Vaccine:
+        return Vaccine(
+            **_base(object_id, baby, timestamp, event, tz, text), vaccine_type=dict(embedded)
+        )
+
+    return Draft(Vaccine, build)
 
 
 def draft_bottle[R: (Formula, Pumped)](
