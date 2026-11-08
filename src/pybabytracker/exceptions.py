@@ -41,6 +41,38 @@ class UnknownBabyError(WriteError):
     """No baby with that ID is known from sync."""
 
 
+class UnknownSelectionError(WriteError):
+    """No entry of a pick list (a milestone, a vaccine, a medicine) has that name or ID.
+
+    ``what`` says which list: "milestone", "vaccine", or "medicine".
+    """
+
+    def __init__(self, what: str, message: str) -> None:
+        super().__init__(message)
+        self.what = what
+
+
+class UnknownMilestoneError(UnknownSelectionError):
+    """No milestone with that name or ID is built in or known from sync."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("milestone", message)
+
+
+class UnknownMedicineError(UnknownSelectionError):
+    """No medicine with that name or ID is known from sync."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("medicine", message)
+
+
+class UnknownVaccineError(UnknownSelectionError):
+    """No vaccine with that name or ID is built in or known from sync."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("vaccine", message)
+
+
 class NotOwnRecordError(WriteError):
     """The record wasn't created by this device, so this device may not delete it."""
 
@@ -87,6 +119,39 @@ class AmountTooSmallError(ValidationError):
     def __init__(self, amount: float) -> None:
         super().__init__(f"an amount of {amount!r} rounds to zero at two decimals")
         self.amount = amount
+
+
+class InvalidSelectionNameError(ValidationError, ValueError):
+    """A pick-list name or ID is empty or isn't text."""
+
+    def __init__(self, what: str, value: object) -> None:
+        super().__init__(f"{what} must be a name or an ID, not {value!r}")
+        self.what = what
+        self.value = value
+
+
+class AmbiguousSelectionError(ValidationError):
+    """A name matches more than one entry of a pick list, so it can't say which is meant.
+
+    Pass the ``object_id`` of the one wanted instead. ``object_ids`` lists the matches.
+    """
+
+    def __init__(self, what: str, wanted: str, object_ids: tuple[str, ...]) -> None:
+        super().__init__(
+            f"{what} {wanted!r} matches {len(object_ids)} entries ({', '.join(object_ids)}): "
+            "pass the ID of the one you mean"
+        )
+        self.what = what
+        self.wanted = wanted
+        self.object_ids = object_ids
+
+
+class NoUsualDoseError(ValidationError, ValueError):
+    """A dose was logged without an amount for a medicine that has no usual dose to default to."""
+
+    def __init__(self, medicine: str | None = None) -> None:
+        super().__init__("this medicine has no usual dose, so give an amount")
+        self.medicine = medicine
 
 
 class MinutesTooLongError(ValidationError):

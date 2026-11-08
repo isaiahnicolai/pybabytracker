@@ -13,6 +13,7 @@ import binascii
 import copy
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any, ClassVar, NamedTuple, Self
@@ -643,7 +644,7 @@ class Medicine(Record):
 
 def _selection_name(selection: object) -> str | None:
     """The ``name`` of an embedded selection object, when it has a string one."""
-    name = selection.get("name") if isinstance(selection, dict) else None
+    name = selection.get("name") if isinstance(selection, Mapping) else None
     return name if isinstance(name, str) else None
 
 
@@ -721,6 +722,57 @@ class Milestone(Record):
     def milestone_name(self) -> str | None:
         """The embedded milestone's name, when it has one."""
         return _selection_name(self.milestone_type)
+
+
+@_register
+@dataclass(kw_only=True)
+class MilestoneSelection(Record):
+    """A milestone a user added to the app's pick list. It is expected to sync as a transaction
+    of its own (expected shape, not yet seen in synced data), as the milestone embedded in a
+    ``Milestone`` record has been seen to. ``babyID`` is expected when it was added for one baby
+    only; it stays in ``extra``, where ``baby_id`` reads it. The built-in milestones never sync:
+    see ``BUILT_IN_MILESTONES``."""
+
+    object_type: ClassVar[str] = "MilestoneSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
+    used: bool | str | None = _opt("used")
+
+
+@_register
+@dataclass(kw_only=True)
+class MedicationSelection(Record):
+    """A medicine on the app's pick list. It is expected to sync as a transaction of its own
+    (expected shape, not yet seen in synced data): a medicine has been seen only embedded in its
+    doses, as ``medicationSelection``. ``interval`` is in minutes, as iOS syncs it (the app takes
+    hours and syncs 555 as 33300); how Android types it is not yet seen. The prescription flag
+    is ``prescription`` on Android and ``isPresciption`` on iOS; both stay as sent (the iOS one
+    in ``extra``)."""
+
+    object_type: ClassVar[str] = "MedicationSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    unit: str | None = _opt("unit")
+    amount_per_time: float | None = _opt("amountPerTime")
+    interval: int | None = _opt("interval")
+    prescription: bool | str | None = _opt("prescription")
+
+
+@_register
+@dataclass(kw_only=True)
+class VaccineSelection(Record):
+    """A vaccine a user added to the app's pick list. It is expected to sync as a transaction of
+    its own (expected shape, not yet seen in synced data). The built-in vaccines never sync: see
+    ``BUILT_IN_VACCINES``."""
+
+    object_type: ClassVar[str] = "VaccineSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
 
 
 @_register
