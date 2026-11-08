@@ -81,7 +81,7 @@ from .models import (
 )
 from .timers import NursingTimer, PumpTimer
 from .times import format_time, from_unix, parse_time, standard_offset_seconds, to_unix
-from .totals import DayTotals, day_totals
+from .totals import DayTotals, LastBreast, day_totals, last_breast
 
 __all__ = [
     "Allergen",
@@ -107,6 +107,7 @@ __all__ = [
     "InvalidAmountError",
     "Journal",
     "Joy",
+    "LastBreast",
     "Measurement",
     "Medication",
     "Medicine",
@@ -169,6 +170,7 @@ __all__ = [
     "encode_transaction",
     "format_time",
     "from_unix",
+    "last_breast",
     "numeric_code",
     "parse_time",
     "standard_offset_seconds",
