@@ -22,6 +22,7 @@ from .exceptions import (
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownBabyError,
+    UnknownMilestoneError,
     ValidationError,
     WriteError,
     WriteOutcomeUnknownError,
@@ -58,6 +59,7 @@ from .models import (
     Medication,
     Medicine,
     Milestone,
+    MilestoneSelection,
     Nursing,
     NursingSession,
     OtherActivity,
@@ -77,11 +79,16 @@ from .models import (
     encode_transaction,
     numeric_code,
 )
+from .selections import BUILT_IN_MILESTONES, MilestoneChoice
 from .timers import NursingTimer, PumpTimer
 from .times import format_time, from_unix, parse_time, standard_offset_seconds, to_unix
 from .totals import DayTotals, day_totals
 
 __all__ = [
+    "BUILT_IN_MILESTONES",
+    "MilestoneChoice",
+    "MilestoneSelection",
+    "UnknownMilestoneError",
     "Allergen",
     "AmountTooSmallError",
     "ApplyResult",

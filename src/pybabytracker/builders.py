@@ -25,7 +25,7 @@ Conventions:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -42,6 +42,7 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Milestone,
     Nursing,
     Pump,
     Pumped,
@@ -177,6 +178,28 @@ def draft_diaper(
         )
 
     return Draft(Diaper, build)
+
+
+def draft_milestone(
+    selection: Mapping[str, Any],
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Milestone]:
+    """A milestone reached, embedding the milestone it marks as ``milestoneType``."""
+    embedded = dict(selection)
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Milestone:
+        return Milestone(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            milestone_type=dict(embedded),
+            # The Android app sends false: the milestone was picked from the list, not typed in.
+            has_new_type="false",
+        )
+
+    return Draft(Milestone, build)
 
 
 def draft_bottle[R: (Formula, Pumped)](
