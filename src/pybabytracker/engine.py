@@ -86,6 +86,7 @@ from .builders import (
     Draft,
     draft_bottle,
     draft_diaper,
+    draft_medication,
     draft_milestone,
     draft_nursing,
     draft_pump,
@@ -108,6 +109,7 @@ from .exceptions import (
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownBabyError,
+    UnknownMedicineError,
     UnknownMilestoneError,
     UnknownVaccineError,
     WriteOutcomeUnknownError,
@@ -122,6 +124,8 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Medication,
+    MedicationSelection,
     Milestone,
     MilestoneSelection,
     Nursing,
@@ -433,6 +437,55 @@ class SyncEngine:
         found = find_choice(self.vaccine_choices(), _wanted(vaccine, "vaccine"))
         if found is None:
             raise UnknownVaccineError(f"no vaccine {vaccine!r} is built in or known from sync")
+        return found
+
+    async def add_medication(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        medicine: str,
+        *,
+        amount: float | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Medication:
+        """Post a dose of a medicine the baby was given, and apply it locally.
+
+        ``medicine`` is a name or ID from ``medicine_choices()``: a medicine the account has used
+        or added in the app (the app ships none), matched as for ``add_milestone``. ``amount``
+        is in the medicine's own unit (its ``unit``, such as "ml"), and defaults to its usual
+        dose (``amountPerTime``). The record embeds the medicine as ``medicationSelection``. An
+        unknown medicine raises ``UnknownMedicineError``, and a missing or bad amount
+        ``ValueError``, before any request. The other arguments work as for ``add_diaper``.
+        """
+        choice = self.find_medicine(medicine)
+        draft = draft_medication(
+            choice.selection,
+            amount,
+            time=time,
+            timezone_offset=timezone_offset,
+            note=note,
+        )
+        return await self._add(target, baby_id, draft, object_id)
+
+    def medicine_choices(self) -> list[SelectionChoice]:
+        """Every medicine a dose can name, by name: ones synced as ``MedicationSelection``
+        records, and ones doses already embed. The app ships no medicines."""
+        synced = [
+            r.to_payload() for r in self._records.values() if isinstance(r, MedicationSelection)
+        ]
+        embedded = [
+            r.medication_selection for r in self._records.values() if isinstance(r, Medication)
+        ]
+        return merged_choices((), embedded, synced)
+
+    def find_medicine(self, medicine: str) -> SelectionChoice:
+        """The medicine with that ID, or else that name; ``UnknownMedicineError`` without one."""
+        found = find_choice(self.medicine_choices(), _wanted(medicine, "medicine"))
+        if found is None:
+            raise UnknownMedicineError(f"no medicine {medicine!r} is known from sync")
         return found
 
     async def add_formula(

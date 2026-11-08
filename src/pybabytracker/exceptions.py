@@ -45,6 +45,10 @@ class UnknownMilestoneError(WriteError):
     """No milestone with that name or ID is built in or known from sync."""
 
 
+class UnknownMedicineError(WriteError):
+    """No medicine with that name or ID is known from sync."""
+
+
 class UnknownVaccineError(WriteError):
     """No vaccine with that name or ID is built in or known from sync."""
 

@@ -88,6 +88,7 @@ key.
 | `add_pump(client, amount=, ...)` or `add_pump(client, left_volume=, right_volume=, ...)` | `Pump` | a pumping session; belongs to the account, so no `baby_id` |
 | `add_milestone(client, baby_id, milestone, ...)` | `Milestone` | `milestone` is a name or ID from `milestone_choices(baby_id)` |
 | `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
+| `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
