@@ -39,7 +39,11 @@ async with aiohttp.ClientSession() as session:
   `AccountID` it sees and refuses to sync or write after it changes, as the app does. Start from a
   new engine to join the new group.
 - Records are typed (`Diaper`, `Sleep`, `Nursing`, and so on). A record type the library
-  doesn't know stays raw as an `UnknownRecord` with a logged warning. Decoding then encoding any
+  doesn't know stays raw as an `UnknownRecord` (a debug line is logged once per type).
+  `Medication` is a medicine dose with the medicine embedded, and `NursingSession`, the Android
+  app's timed nursing, is a `Nursing`. The Android app sends codes such as a diaper's `status` as
+  strings of digits and `englishMeasure` as a JSON boolean; `numeric_code()` reads either form,
+  and volumes read both. Decoding then encoding any
   payload returns the same JSON, including keys the library doesn't model.
 
 ## Writes
@@ -86,7 +90,33 @@ key.
 | `add_nursing(client, baby_id, left_minutes=, right_minutes=, ...)` | `Nursing` | a finished session |
 | `add_sleep(client, baby_id, start=, end=, ...)` | `Sleep` | a finished sleep |
 | `add_pump(client, amount=, ...)` or `add_pump(client, left_volume=, right_volume=, ...)` | `Pump` | a pumping session; belongs to the account, so no `baby_id` |
+| `add_milestone(client, baby_id, milestone, ...)` | `Milestone` | `milestone` is a name or ID from `milestone_choices(baby_id)` |
+| `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
+| `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 
+- A milestone names one from the app's pick list: one of the 20 it ships with
+  (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
+  in the app and known from sync. `milestone_choices(baby_id)` lists them and `find_milestone`
+  resolves a name (ignoring case) or ID. An unknown one raises `UnknownMilestoneError`, an empty
+  or non-text one `InvalidSelectionNameError` (a `ValueError`), and a name that matches two
+  entries `AmbiguousSelectionError` naming their IDs, so pass the ID; all before any request. The three unknown-entry errors share the base
+  `UnknownSelectionError` (with `.what`), and a dose with no `amount` for a medicine that has no
+  usual dose raises `NoUsualDoseError`.
+  A milestone added for one baby is left out for the others. Adding a new milestone to the pick
+  list isn't supported yet. Vaccines work the same way: the app's 10 built-ins
+  (`BUILT_IN_VACCINES`) plus synced ones, `vaccine_choices()`, `find_vaccine`, and
+  `UnknownVaccineError`. A medicine has no built-ins: `medicine_choices()` lists the ones doses
+  already carry, and a `Medication` is logged against one by name or ID.
+- Where several records carry a copy of one entry, a synced copy wins, then the copy in the
+  newest record (by its `timestamp`, then its `time`), so a dose's default amount is the usual
+  dose of the newest dose. A medicine without a usual dose that is a number above zero needs an
+  `amount`. Doses are rounded to 2 decimals, like volumes, in the medicine's own unit.
+- How well this is checked: a built-in milestone ("Back home") and vaccine ("HepB") and a
+  medicine dose were posted on iOS and read back unchanged, and the app showed each as the entry
+  it is. The other built-in IDs, Android, and a custom milestone or vaccine are unverified. A
+  pick-list entry syncing as its own transaction (`MilestoneSelection`,
+  `VaccineSelection`, `MedicationSelection`) is an expected shape, not yet seen in synced data.
+  A medicine's `interval` is in minutes.
 - Volumes are `Volume(value, "oz")` or `Volume(value, "ml")`, written as a `VolumeMeasure` with
   `englishMeasure` `"true"` (ounces) or `"false"` (milliliters), rounded to 2 decimals (an integer
   when whole). The number is written as given, with no conversion, as the app does.
@@ -96,8 +126,11 @@ key.
   `timezone_offset=standard_offset_seconds(tz, time)`: New York is -18000 in July and January.
 - Nursing: `time` is the session's start, as in the capture. Give `start_time`, or `end_time`
   (start is end minus the total minutes), or neither (the session just ended). `finish_side` is
-  `SIDE_LEFT` or `SIDE_RIGHT`, defaulting to the last side used (right when both were). For a pump that default is a guess
-  (the one captured pump with both sides finished left), so pass `finish_side` yourself.
+  `SIDE_LEFT` (1), `SIDE_RIGHT` (2), or `SIDE_NONE` (0), the app's numbering. The app shows the
+  field as the side a session started on. It defaults to the only side used, or `SIDE_NONE` when
+  both were, since the totals can't tell which came first (the app also saves most two-sided
+  pumps with `SIDE_NONE`), so pass `finish_side` yourself when you know it. A `NursingTimer`
+  knows: its `start_side` is the side it started on.
 - Sleep: `time` is `start`. `duration` is whole minutes: the length rounded half up (the capture
   stored about 30 seconds as 1), and at least 1, because a duration of 0 means a sleep in
   progress. `end` must be after `start`, and a sleep can't be longer than 24 hours.

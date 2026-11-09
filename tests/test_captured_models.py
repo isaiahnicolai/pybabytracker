@@ -128,6 +128,19 @@ def test_english_measure_false_means_milliliters() -> None:
     assert record.to_payload() == payload
 
 
+def test_the_android_apps_boolean_english_measure_is_read_like_the_string() -> None:
+    # Android sends englishMeasure as a JSON boolean; true is still ounces.
+    for english, unit in ((True, "oz"), (False, "ml")):
+        payload = payload_for(
+            "Formula",
+            amount={"BCObjectType": "VolumeMeasure", "englishMeasure": english, "value": 4.0},
+        )
+        record = decode_payload(payload)
+        assert isinstance(record, Formula)
+        assert record.volume == Volume(4.0, unit)
+        assert record.to_payload() == payload
+
+
 def test_a_missing_english_measure_means_milliliters() -> None:
     payload = payload_for("Formula", amount={"BCObjectType": "VolumeMeasure", "value": 90})
     record = decode_payload(payload)

@@ -88,8 +88,9 @@ def test_nursing_and_bottles_are_feeds() -> None:
         record("Nursing", NOON),
         record("Formula", NOON + timedelta(minutes=1)),
         record("Pumped", NOON + timedelta(minutes=2)),
+        record("NursingSession", NOON + timedelta(minutes=3)),
     )
-    assert result.feeds == 3
+    assert result.feeds == 4
 
 
 def test_other_records_are_not_counted() -> None:
@@ -228,3 +229,18 @@ def test_feeds_and_bottle_volume_follow_the_same_dst_day(day: date) -> None:
     ]
     result = day_totals(records, BABY_ID, start, end)
     assert (result.feeds, result.bottle_milliliters) == (2, 100.0)
+
+
+def test_android_diapers_count_by_kind_though_their_status_is_a_string() -> None:
+    result = totals(
+        record("Diaper", NOON, status="0"),
+        record("Diaper", NOON + timedelta(minutes=1), status="1"),
+        record("Diaper", NOON + timedelta(minutes=2), status="2"),
+    )
+    assert (result.diapers, result.wet, result.dirty, result.mixed) == (3, 1, 1, 1)
+
+
+def test_an_android_ounce_bottle_converts_to_milliliters() -> None:
+    amount = {"BCObjectType": "VolumeMeasure", "englishMeasure": True, "value": 4.0}
+    result = totals(record("Formula", NOON, amount=amount))
+    assert result.bottle_milliliters == pytest.approx(4 * MILLILITERS_PER_FLUID_OUNCE)

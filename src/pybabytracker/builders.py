@@ -25,30 +25,37 @@ Conventions:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .exceptions import NoUsualDoseError
 from .models import (
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
     SIDE_LEFT,
+    SIDE_NONE,
     SIDE_RIGHT,
     UNIT_MILLILITERS,
     UNIT_OUNCES,
     Baby,
     Diaper,
     Formula,
+    Medication,
+    Milestone,
     Nursing,
     Pump,
     Pumped,
     Record,
     Sleep,
+    Vaccine,
     Volume,
     VolumeMeasure,
+    _selection_name,
 )
+from .models import _number as _plain_number
 from .times import format_time
 
 MAX_MINUTES_PER_SIDE = 240
@@ -94,7 +101,7 @@ def _offset(moment: datetime, name: str) -> int:
 
 
 def _number(value: float) -> int | float:
-    """A volume as the app writes it: rounded to 2 decimals, an integer when whole."""
+    """A volume or dose as the app writes it: rounded to 2 decimals, an integer when whole."""
     rounded = round(float(value), 2)
     return int(rounded) if rounded.is_integer() else rounded
 
@@ -127,12 +134,18 @@ def _minutes(value: object, name: str) -> int:
 
 
 def _side(finish_side: int | None, left_used: bool, right_used: bool) -> int:
-    """The side finished on: as given, else the last side used (right when both were)."""
+    """The record's side (``finishSide``, which the app shows as the side a session started on):
+    as given, else the only side used, else ``SIDE_NONE`` when both were, since the start can't be
+    told from the totals. The app also saves a two-sided pump with no side."""
     if finish_side is not None:
-        if finish_side not in (SIDE_LEFT, SIDE_RIGHT):
-            raise ValueError(f"finish_side must be SIDE_LEFT or SIDE_RIGHT, not {finish_side!r}")
+        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
+            raise ValueError(
+                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
+            )
         return finish_side
-    return SIDE_LEFT if left_used and not right_used else SIDE_RIGHT
+    if left_used and right_used:
+        return SIDE_NONE
+    return SIDE_LEFT if left_used else SIDE_RIGHT
 
 
 def _base(
@@ -174,6 +187,97 @@ def draft_diaper(
         )
 
     return Draft(Diaper, build)
+
+
+def draft_milestone(
+    selection: Mapping[str, Any],
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Milestone]:
+    """A milestone reached, embedding the milestone it marks as ``milestoneType``."""
+    embedded = dict(selection)
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Milestone:
+        return Milestone(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            milestone_type=dict(embedded),
+            # false: the milestone was picked from the list, not typed in. The value we expect
+            # the apps to send; not yet seen in synced data.
+            has_new_type="false",
+        )
+
+    return Draft(Milestone, build)
+
+
+def _usual_dose(selection: Mapping[str, Any]) -> int | float | None:
+    """A medicine's usual dose (``amountPerTime``), or ``None`` unless it is a number that is
+    still above zero once written. Text, a bool, null, zero, and a non-finite number are not a
+    usual dose: the caller must give an amount rather than have one guessed."""
+    usual = _plain_number(selection.get("amountPerTime"))
+    if usual is None or not math.isfinite(usual) or _number(usual) <= 0:
+        return None
+    return _number(usual)
+
+
+def draft_medication(
+    selection: Mapping[str, Any],
+    amount: float | None,
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Medication]:
+    """A dose of a medicine: ``amount`` in its unit (default its usual dose, ``amountPerTime``),
+    with the medicine embedded as ``medicationSelection``."""
+    embedded = dict(selection)
+    if amount is None:
+        amount = _usual_dose(embedded)
+        if amount is None:
+            raise NoUsualDoseError(_selection_name(embedded))
+    if isinstance(amount, bool) or not isinstance(amount, int | float) or not math.isfinite(amount):
+        raise ValueError("a dose's amount must be a finite number")
+    if amount <= 0:
+        raise ValueError("a dose's amount must be more than zero")
+    dose = _number(amount)
+    if dose <= 0:
+        raise ValueError("a dose's amount must be more than zero")  # also after rounding
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Medication:
+        return Medication(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            amount=dose,
+            medication_selection=dict(embedded),
+        )
+
+    return Draft(Medication, build)
+
+
+def draft_vaccine(
+    selection: Mapping[str, Any],
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Vaccine]:
+    """A vaccine given, embedding the vaccine as ``vaccineType``.
+
+    The record carries the keys we expect the apps to send (expected shape, not yet seen in
+    synced data), and not ``vaccID`` or ``docVisitID``, which the model reads but the app keeps
+    in its local database.
+    """
+    embedded = dict(selection)
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Vaccine:
+        return Vaccine(
+            **_base(object_id, baby, timestamp, event, tz, text), vaccine_type=dict(embedded)
+        )
+
+    return Draft(Vaccine, build)
 
 
 def draft_bottle[R: (Formula, Pumped)](

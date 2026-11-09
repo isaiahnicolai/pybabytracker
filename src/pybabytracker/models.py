@@ -13,6 +13,7 @@ import binascii
 import copy
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any, ClassVar, NamedTuple, Self
@@ -34,11 +35,77 @@ _TIME = "time"
 _BABY = "baby"
 _VOLUME = "volume"
 
-SIDE_LEFT = 0
-SIDE_RIGHT = 1
+# The app's finishSide values for nursing and pumps: 0 is not set, 1 left, 2 right. Synced
+# records agree: left-only sessions carry 1 and right-only ones 2, from iOS and Android alike.
+# A pump with both sides used is usually saved with 0.
+SIDE_NONE = 0
+SIDE_LEFT = 1
+SIDE_RIGHT = 2
 
 UNIT_OUNCES = "oz"
 UNIT_MILLILITERS = "ml"
+UNIT_POUNDS = "lb"
+UNIT_KILOGRAMS = "kg"
+UNIT_INCHES = "in"
+UNIT_CENTIMETERS = "cm"
+UNIT_FAHRENHEIT = "F"
+UNIT_CELSIUS = "C"
+
+
+MEDIA_PHOTO = 0
+MEDIA_VIDEO = 1
+
+
+class Picture(NamedTuple):
+    """A picture attached to a record (one entry of its ``pictureNote``).
+
+    ``file_name`` is the entry's ``fileName``. ``file`` is the photo or video on the service and
+    ``thumbnail_file`` its thumbnail, both for ``BabyTrackerClient.get_picture``. A record
+    picture's photo file (``fileName`` plus ".jpg") was seen in synced data and downloaded. These
+    are the expected shape, not yet seen in synced data: the ".mp4" file for a video
+    (``MEDIA_VIDEO``), the "__thumbnail.jpg" thumbnail, and a ``mediaType`` sent as a digit
+    string. ``file`` is ``None`` for a media type other than a photo or a video.
+    """
+
+    object_id: str | None
+    file_name: str
+    media_type: int | None
+    file: str | None
+    thumbnail_file: str
+
+
+def _is_deleted(value: object) -> bool:
+    """Whether a ``deleted`` flag is set: "true" or a real bool. 1 and "1" count too, an
+    expected shape, not yet seen in synced data."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1")
+    return value == 1
+
+
+def _picture(entry: object) -> Picture | None:
+    """A ``pictureNote`` entry, or ``None`` when it's deleted or has no usable ``fileName``."""
+    if not isinstance(entry, dict):
+        return None
+    if _is_deleted(entry.get("deleted")):
+        return None
+    file_name = entry.get("fileName")
+    if not isinstance(file_name, str) or not is_plain_file_name(file_name):
+        return None
+    # A number, or a digit string ("0") that Android is expected to send.
+    media_type = numeric_code(entry.get("mediaType"))
+    extension = (
+        {MEDIA_PHOTO: ".jpg", MEDIA_VIDEO: ".mp4"}.get(media_type)
+        if media_type is not None
+        else None
+    )
+    object_id = entry.get("objectID")
+    return Picture(
+        object_id=object_id if isinstance(object_id, str) else None,
+        file_name=file_name,
+        media_type=media_type,
+        file=file_name + extension if extension else None,
+        thumbnail_file=file_name + "__thumbnail.jpg",
+    )
 
 
 class Volume(NamedTuple):
@@ -48,13 +115,44 @@ class Volume(NamedTuple):
     unit: str
 
 
+class Measurement(NamedTuple):
+    """A weight, a length, or a temperature: a number and its unit (``"lb"``/``"kg"``,
+    ``"in"``/``"cm"``, or ``"F"``/``"C"``)."""
+
+    value: float
+    unit: str
+
+
+def _measurement(field: Any, is_english_scale: Any, units: tuple[str, str]) -> Measurement | None:
+    """Resolve a growth field: the synced measure ``{"BCObjectType", "englishMeasure", "value"}``,
+    or a plain number with the record's 0/1 scale column (the app's database shape).
+
+    ``units`` is the (US, metric) pair. ``englishMeasure`` "true" (or the Android app's ``true``)
+    means the US unit; anything else is metric. A plain number with no 0 or 1 scale has no unit,
+    so it gives ``None``, as does anything without a number.
+    """
+    english_unit, metric_unit = units
+    if isinstance(field, dict):
+        number = _number(field.get("value"))
+        if number is None:
+            return None
+        english_measure = field.get("englishMeasure")
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as the US unit.
+        english = english_measure == "true" or english_measure is True
+        return Measurement(number, english_unit if english else metric_unit)
+    number = _number(field)
+    if number is None or isinstance(is_english_scale, bool) or is_english_scale not in (0, 1):
+        return None
+    return Measurement(number, english_unit if is_english_scale == 1 else metric_unit)
+
+
 class VolumeMeasure:
     """A ``VolumeMeasure`` payload object: ``{"BCObjectType", "englishMeasure", "value"}``.
 
     The raw object is kept as is, so unknown keys and odd values survive a round trip.
     ``englishMeasure`` "true" means ounces and "false" means milliliters, both observed in captures
-    (2026-10-26; a metric write carries the number as entered). Any other value, or no key, is read
-    as milliliters.
+    (2026-10-26; a metric write carries the number as entered). The Android app sends the JSON
+    booleans ``true`` and ``false`` instead. Any other value, or no key, is read as milliliters.
     """
 
     def __init__(
@@ -86,7 +184,9 @@ class VolumeMeasure:
         number = _number(self.value)
         if number is None:
             return None
-        unit = UNIT_OUNCES if self.english_measure == "true" else UNIT_MILLILITERS
+        # Not ``in ("true", True)``: 1 == True, so that would read the number 1 as ounces.
+        english = self.english_measure == "true" or self.english_measure is True
+        unit = UNIT_OUNCES if english else UNIT_MILLILITERS
         return Volume(number, unit)
 
     def to_payload(self) -> dict[str, Any]:
@@ -99,6 +199,26 @@ class VolumeMeasure:
 
     def __repr__(self) -> str:
         return f"VolumeMeasure({self.raw!r})"
+
+
+def numeric_code(value: Any) -> int | None:
+    """A numeric code, such as a diaper's ``status`` or a ``finishSide``, as an int.
+
+    iOS sends these as numbers and the Android app as strings of digits (``"1"``), so both are
+    read; anything else (a bool, a fraction, other text, a string too long to convert) is
+    ``None``. Only ASCII digits count, which is all the apps send. The record keeps the raw
+    value, so the round trip is unchanged.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        try:
+            return int(value)
+        except ValueError:  # past Python's int-string limit
+            return None
+    return None
 
 
 def _number(value: Any) -> float | None:
@@ -120,6 +240,30 @@ def _volume_of(amount: Any, is_english_scale: Any) -> Volume | None:
     if is_english_scale == 0:
         return Volume(number, UNIT_MILLILITERS)
     return None
+
+
+def is_plain_file_name(name: object) -> bool:
+    """Whether ``name`` is a string with some visible text and no path in it.
+
+    File names come from other devices' records, so a name that is empty, only whitespace, has a
+    path separator, or is "." or ".." is never used to build a request.
+    """
+    return (
+        isinstance(name, str)
+        and bool(name.strip())
+        and "/" not in name
+        and "\\" not in name
+        and name not in (".", "..")
+    )
+
+
+def _picture_stem(name: object) -> str | None:
+    """A ``pictureName`` without a ".jpg" extension, or ``None`` when it isn't a plain file name
+    or nothing is left once the extension is gone."""
+    if not isinstance(name, str) or not is_plain_file_name(name):
+        return None
+    stem = name[:-4] if name.lower().endswith(".jpg") else name
+    return stem if is_plain_file_name(stem) else None
 
 
 def _key(name: str, codec: str | None = None) -> Any:
@@ -152,6 +296,12 @@ class Record:
     @property
     def record_type(self) -> str:
         return self.object_type
+
+    @property
+    def pictures(self) -> list[Picture]:
+        """The pictures attached to the record, leaving out deleted ones and unusable entries."""
+        entries = self.picture_note if isinstance(self.picture_note, list) else []
+        return [picture for entry in entries if (picture := _picture(entry)) is not None]
 
     @property
     def baby_id(self) -> str | None:
@@ -272,6 +422,24 @@ class Baby(Record):
     gender: str | None = _opt("gender")
     picture_name: str | None = _opt("pictureName")
 
+    @property
+    def picture_file(self) -> str | None:
+        """The photo's file on the service, ``pictureName`` plus ".jpg", or ``None`` when the baby
+        has no photo. A name that already ends in ".jpg" is used as it is. Pass it to
+        ``BabyTrackerClient.get_picture``. The file was seen in synced data and downloaded."""
+        stem = _picture_stem(self.picture_name)
+        if stem is None or self.picture_name is None:
+            return None
+        return self.picture_name if self.picture_name.lower().endswith(".jpg") else f"{stem}.jpg"
+
+    @property
+    def landscape_picture_file(self) -> str | None:
+        """The landscape crop's file, ``pictureName`` plus "_l.jpg", or ``None`` when the baby has
+        no photo. Expected, not yet seen in synced data: that the service has this file, and that
+        every baby with a photo has one."""
+        stem = _picture_stem(self.picture_name)
+        return f"{stem}_l.jpg" if stem else None
+
 
 @_register
 @dataclass(kw_only=True)
@@ -299,6 +467,15 @@ class Nursing(Record):
     is_detailed: str | None = _opt("isDetailed")
     state: int | None = _opt("state")
     pair_session_state: int | None = _opt("pairSessionState")
+
+
+@_register
+@dataclass(kw_only=True)
+class NursingSession(Nursing):
+    """A nursing session from the Android app's timer, which syncs under this type name. It
+    has the ``Nursing`` fields plus ``detailed`` and the per-side timestamps, kept in ``extra``."""
+
+    object_type: ClassVar[str] = "NursingSession"
 
 
 @_register
@@ -333,13 +510,35 @@ class Pumped(Record):
 @_register
 @dataclass(kw_only=True)
 class OtherFeed(Record):
+    """A solid food or other feed. The synced payload embeds the food as ``feedType`` (with its
+    ``name``) and gives the amount as a ``VolumeMeasure`` whose number counts ``unit``, which is
+    free text such as "Oz", "Pieces", or "Tsp".
+
+    Read the amount with ``quantity`` and ``unit``, not ``amount.volume``: that reads
+    ``englishMeasure`` as ounces or milliliters, which is wrong when ``unit`` is "Pieces"."""
+
     object_type: ClassVar[str] = "OtherFeed"
 
+    feed_type: dict[str, Any] | None = _opt("feedType")
+    desc: dict[str, Any] | None = _opt("desc")
+    # The app's database columns, kept for payloads that carry them.
     desc_id: str | None = _opt("descID")
     type_id: str | None = _opt("typeID")
-    amount: float | None = _opt("amount")
+    amount: VolumeMeasure | float | None = _vol("amount")
     is_english_scale: int | None = _opt("isEnglishScale")
     unit: str | None = _opt("unit")
+
+    @property
+    def food_name(self) -> str | None:
+        """The embedded food's name, when it has one."""
+        return _selection_name(self.feed_type)
+
+    @property
+    def quantity(self) -> float | None:
+        """How many of ``unit`` were eaten, from the measure or a plain number."""
+        if isinstance(self.amount, VolumeMeasure):
+            return _number(self.amount.value)
+        return _number(self.amount)
 
 
 @_register
@@ -399,13 +598,39 @@ class Sleep(Record):
 @_register
 @dataclass(kw_only=True)
 class Growth(Record):
+    """A growth measurement. The apps sync ``weight`` as a ``WeightMeasure`` and ``length`` and
+    ``head`` as ``LengthMeasure`` objects; the app's database stores plain numbers with
+    ``isEnglishWeightScale`` and ``isEnglishLengthScale``. The fields keep whichever arrived, and
+    the ``*_reading`` properties read both. A value is as sent: the apps store a 32-bit float."""
+
     object_type: ClassVar[str] = "Growth"
 
-    weight: float | None = _opt("weight")
-    length: float | None = _opt("length")
-    head: float | None = _opt("head")
+    weight: dict[str, Any] | float | None = _opt("weight")
+    length: dict[str, Any] | float | None = _opt("length")
+    head: dict[str, Any] | float | None = _opt("head")
     is_english_length_scale: int | None = _opt("isEnglishLengthScale")
     is_english_weight_scale: int | None = _opt("isEnglishWeightScale")
+
+    @property
+    def weight_reading(self) -> Measurement | None:
+        """The weight in pounds or kilograms, or ``None`` when there isn't one."""
+        return _measurement(
+            self.weight, self.is_english_weight_scale, (UNIT_POUNDS, UNIT_KILOGRAMS)
+        )
+
+    @property
+    def length_reading(self) -> Measurement | None:
+        """The length in inches or centimeters, or ``None`` when there isn't one."""
+        return _measurement(
+            self.length, self.is_english_length_scale, (UNIT_INCHES, UNIT_CENTIMETERS)
+        )
+
+    @property
+    def head_reading(self) -> Measurement | None:
+        """The head circumference in inches or centimeters, or ``None`` when there isn't one."""
+        return _measurement(
+            self.head, self.is_english_length_scale, (UNIT_INCHES, UNIT_CENTIMETERS)
+        )
 
 
 @_register
@@ -417,40 +642,157 @@ class Medicine(Record):
     amount: float | None = _opt("amount")
 
 
+def _selection_name(selection: object) -> str | None:
+    """The ``name`` of an embedded selection object, when it has a string one."""
+    name = selection.get("name") if isinstance(selection, Mapping) else None
+    return name if isinstance(name, str) else None
+
+
+@_register
+@dataclass(kw_only=True)
+class Medication(Record):
+    """A dose of a medicine, as the apps sync one. The medicine itself (``name``, ``unit``,
+    ``amountPerTime``, ``interval``, ``objectID``) is embedded as ``medicationSelection``."""
+
+    object_type: ClassVar[str] = "Medication"
+
+    medication_selection: dict[str, Any] | None = _opt("medicationSelection")
+    amount: float | None = _opt("amount")
+
+    @property
+    def medicine_name(self) -> str | None:
+        """The embedded medicine's name, when it has one."""
+        return _selection_name(self.medication_selection)
+
+
 @_register
 @dataclass(kw_only=True)
 class Temperature(Record):
+    """A temperature. The apps sync it as ``temperature``, a ``TemperatureMeasure``; the app's
+    database stores ``temp`` with ``isEnglishScale``. ``reading`` reads either. The value is as
+    sent: the apps store a 32-bit float, so 100.4 can arrive as 100.4000015258789."""
+
     object_type: ClassVar[str] = "Temperature"
 
+    temperature: dict[str, Any] | None = _opt("temperature")
     temp: float | None = _opt("temp")
     is_english_scale: int | None = _opt("isEnglishScale")
+
+    @property
+    def reading(self) -> Measurement | None:
+        """The temperature in Fahrenheit or Celsius, or ``None`` when there isn't one."""
+        units = (UNIT_FAHRENHEIT, UNIT_CELSIUS)
+        if self.temperature is not None:
+            return _measurement(self.temperature, None, units)
+        return _measurement(self.temp, self.is_english_scale, units)
 
 
 @_register
 @dataclass(kw_only=True)
 class Vaccine(Record):
+    """A vaccine given. The apps sync the vaccine itself (``name``, ``forAge``, ``objectID``)
+    embedded as ``vaccineType``. ``vaccID`` and ``docVisitID`` are the local database's columns."""
+
     object_type: ClassVar[str] = "Vaccine"
 
+    vaccine_type: dict[str, Any] | None = _opt("vaccineType")
     vacc_id: str | None = _opt("vaccID")
     doc_visit_id: str | None = _opt("docVisitID")
+
+    @property
+    def vaccine_name(self) -> str | None:
+        """The embedded vaccine's name, when it has one."""
+        return _selection_name(self.vaccine_type)
 
 
 @_register
 @dataclass(kw_only=True)
 class Milestone(Record):
+    """A milestone reached. The apps sync the milestone itself (``name``, ``forAge``,
+    ``objectID``) embedded as ``milestoneType``. ``milestoneSelectionID`` is the local database's
+    column."""
+
     object_type: ClassVar[str] = "Milestone"
 
+    milestone_type: dict[str, Any] | None = _opt("milestoneType")
+    has_new_type: bool | str | None = _opt("hasNewType")
     milestone_selection_id: str | None = _opt("milestoneSelectionID")
+
+    @property
+    def milestone_name(self) -> str | None:
+        """The embedded milestone's name, when it has one."""
+        return _selection_name(self.milestone_type)
+
+
+@_register
+@dataclass(kw_only=True)
+class MilestoneSelection(Record):
+    """A milestone a user added to the app's pick list. It is expected to sync as a transaction
+    of its own (expected shape, not yet seen in synced data), as the milestone embedded in a
+    ``Milestone`` record has been seen to. ``babyID`` is expected when it was added for one baby
+    only; it stays in ``extra``, where ``baby_id`` reads it. The built-in milestones never sync:
+    see ``BUILT_IN_MILESTONES``."""
+
+    object_type: ClassVar[str] = "MilestoneSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
+    used: bool | str | None = _opt("used")
+
+
+@_register
+@dataclass(kw_only=True)
+class MedicationSelection(Record):
+    """A medicine on the app's pick list. It is expected to sync as a transaction of its own
+    (expected shape, not yet seen in synced data): a medicine has been seen only embedded in its
+    doses, as ``medicationSelection``. ``interval`` is in minutes, as iOS syncs it (the app takes
+    hours and syncs 555 as 33300); how Android types it is not yet seen. The prescription flag
+    is ``prescription`` on Android and ``isPresciption`` on iOS; both stay as sent (the iOS one
+    in ``extra``)."""
+
+    object_type: ClassVar[str] = "MedicationSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    unit: str | None = _opt("unit")
+    amount_per_time: float | None = _opt("amountPerTime")
+    interval: int | None = _opt("interval")
+    prescription: bool | str | None = _opt("prescription")
+
+
+@_register
+@dataclass(kw_only=True)
+class VaccineSelection(Record):
+    """A vaccine a user added to the app's pick list. It is expected to sync as a transaction of
+    its own (expected shape, not yet seen in synced data). The built-in vaccines never sync: see
+    ``BUILT_IN_VACCINES``."""
+
+    object_type: ClassVar[str] = "VaccineSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    for_age: int | None = _opt("forAge")
 
 
 @_register
 @dataclass(kw_only=True)
 class OtherActivity(Record):
+    """Any other activity (tummy time, a walk, a bath logged as an activity). The apps sync the
+    activity's kind (``name``, ``objectID``) embedded as ``desc``. ``descID`` and ``locationID``
+    are the local database's columns."""
+
     object_type: ClassVar[str] = "OtherActivity"
 
+    desc: dict[str, Any] | None = _opt("desc")
     desc_id: str | None = _opt("descID")
     location_id: str | None = _opt("locationID")
     duration: int | None = _opt("duration")
+
+    @property
+    def activity_name(self) -> str | None:
+        """The embedded activity kind's name, when it has one."""
+        return _selection_name(self.desc)
 
 
 @_register
