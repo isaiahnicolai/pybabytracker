@@ -14,6 +14,8 @@ from pybabytracker import (
     DIAPER_WET,
     OP_ADD,
     AccountChangedError,
+    AccountResetError,
+    AuthenticationError,
     BabyTrackerClient,
     Device,
     RawTransaction,
@@ -296,3 +298,76 @@ async def test_a_source_without_an_account_id_is_trusted() -> None:
     await engine.sync(_NoSignIn())
 
     assert engine.account_id is None
+
+
+# --- a device from before a reset is refused at sign-in -----------------------------------------
+
+
+async def test_a_device_from_before_a_reset_is_refused_as_a_reset_not_a_bad_password(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    fake_server.reset_devices.add(PROBE_UUID)
+
+    with pytest.raises(AccountResetError) as caught:
+        await client.sign_in()
+
+    assert isinstance(caught.value, AccountChangedError)
+    assert not isinstance(caught.value, AuthenticationError)
+    assert caught.value.signed_in is None
+
+
+async def test_a_wrong_password_is_still_an_authentication_error(
+    session: aiohttp.ClientSession, fake_server: FakeSyncServer
+) -> None:
+    fake_server.reset_devices.add(PROBE_UUID)
+    client = BabyTrackerClient(
+        fake_server.email,
+        "wrong",
+        PROBE_UUID,
+        "Test Device",
+        session=session,
+        base_url=fake_server.base_url,
+    )
+
+    with pytest.raises(AuthenticationError) as caught:
+        await client.sign_in()
+    assert not isinstance(caught.value, AccountChangedError)
+
+
+async def test_a_sync_after_a_reset_that_refuses_the_device_raises_and_applies_nothing(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    fake_server.add_device(PHONE)
+    fake_server.add_transaction(PHONE, OP_ADD, payload_for("Diaper", rid(1)))
+    engine = SyncEngine(device_uuid=PROBE_UUID)
+    await engine.sync(client)
+
+    fake_server.reset_devices.add(PROBE_UUID)
+    fake_server.sessions.clear()
+    fake_server.add_transaction(PHONE, OP_ADD, payload_for("Sleep", rid(2)))
+
+    with pytest.raises(AccountResetError) as caught:
+        await engine.sync(client)
+    assert caught.value.saved == 424242
+    assert set(engine.records) == {rid(1)}
+
+
+async def test_a_new_device_joins_after_a_reset(
+    session: aiohttp.ClientSession, fake_server: FakeSyncServer
+) -> None:
+    fake_server.reset_devices.add(PROBE_UUID)
+    fake_server.add_device(PHONE)
+    fake_server.add_transaction(PHONE, OP_ADD, payload_for("Diaper", rid(1)))
+    joined = BabyTrackerClient(
+        fake_server.email,
+        fake_server.password,
+        "NEW-DEVICE-0000-4000-8000-000000000001",
+        "Test Device",
+        session=session,
+        base_url=fake_server.base_url,
+    )
+
+    engine = SyncEngine(device_uuid="NEW-DEVICE-0000-4000-8000-000000000001")
+    await engine.sync(joined)
+
+    assert set(engine.records) == {rid(1)}

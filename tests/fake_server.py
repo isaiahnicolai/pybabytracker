@@ -59,6 +59,8 @@ class FakeSyncServer:
         self.delay = 0.0
         # Status to return from POST /session (None means normal behavior).
         self.session_status: int | None = None
+        # Devices refused at sign-in because they joined before the account was reset.
+        self.reset_devices: set[str] = set()
         # Return at most this many log entries per request.
         self.page_size: int | None = None
         # Leave out log entries numbered below this (an older history the server trimmed).
@@ -165,6 +167,13 @@ class FakeSyncServer:
         body = self.requests[-1].body
         if body["EmailAddress"] != self.email or body["Password"] != self.password:
             return self._json({"error": "bad credentials"}, status=401)
+        if body["Device"]["DeviceUUID"] in self.reset_devices:
+            # As the live service answers, as text/html.
+            return web.Response(
+                status=401,
+                text="Account has been reset. Please login again",
+                content_type="text/html",
+            )
         device = body["Device"]
         if self.register_devices and device["DeviceUUID"] not in self.devices:
             new = self.add_device(device["DeviceUUID"], device["DeviceName"])
