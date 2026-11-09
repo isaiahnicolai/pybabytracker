@@ -11,6 +11,7 @@ from .exceptions import (
     AuthenticationError,
     BabyTrackerConnectionError,
     BabyTrackerError,
+    DownloadRefusedError,
     EndBeforeStartError,
     InvalidAmountError,
     InvalidSelectionNameError,
@@ -95,6 +96,7 @@ from .models import (
     encode_transaction,
     numeric_code,
 )
+from .seed import Seed, read_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
     BUILT_IN_MILESTONES,
@@ -111,6 +113,7 @@ __all__ = [
     "MEDIA_VIDEO",
     "Picture",
     "AccountChangedError",
+    "DownloadRefusedError",
     "Allergen",
     "AmbiguousSelectionError",
     "AmountTooSmallError",
@@ -171,6 +174,7 @@ __all__ = [
     "SIDE_LEFT",
     "SIDE_NONE",
     "SIDE_RIGHT",
+    "Seed",
     "SelectionChoice",
     "Sick",
     "Sleep",
@@ -215,6 +219,7 @@ __all__ = [
     "last_breast",
     "numeric_code",
     "parse_time",
+    "read_seed",
     "standard_offset_seconds",
     "to_unix",
 ]

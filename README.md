@@ -21,10 +21,11 @@ async with aiohttp.ClientSession() as session:
         "parent@example.com", "password", "STABLE-DEVICE-UUID", "Home Assistant", session=session
     )
     engine = SyncEngine(device_uuid="STABLE-DEVICE-UUID")  # or SyncEngine.from_dict(saved_state)
-    await engine.sync(client)  # fetches only devices that are ahead of what was seen
+    result = await engine.sync(client)  # the first also reads the seed; then only what's new
     diaper = await engine.add_diaper(client, baby_id, DIAPER_WET)  # posts as this device
     await engine.delete_record(client, diaper.object_id)  # only records this device created
-    saved_state = engine.to_dict()  # JSON-safe, for the caller to persist
+    saved_state = engine.to_dict()  # JSON-safe: save it after writes, and after a sync with
+    # result.transactions_applied or result.seed_read
 ```
 
 - Pass your own `aiohttp.ClientSession` (the client never closes it), and make it dedicated to
@@ -223,7 +224,28 @@ Across devices the result doesn't depend on which device is fetched first:
 
 Tombstones are saved by `to_dict()`. State saved by an older version (1) loads with none.
 A payload that can't be decoded at all is skipped with a warning, and the sync moves past it. A
-fresh `SyncEngine` replays every log, so it recovers skipped payloads once a fix ships.
+fresh `SyncEngine` replays every log, so it recovers skipped payloads once a fix ships, and it
+reads the seed again.
+
+### The seed
+
+The logs don't hold the whole history. The account also has a seed, a full copy of its database
+as of some point (`client.get_seed()`, a zip that `read_seed` decodes), and records from devices
+that have since left the account are only there. The first sync reads it before the logs, and
+state saved before this version reads it on its next sync. Seed records are merged as adds from
+no device: a log copy of a record wins unless its timestamp is older, and a delete in a log
+removes it. Every log is still read from the start, as the app does after loading a seed.
+
+`SyncResult.seed_read` is true for the sync that read the seed (or learned there is none), so save
+the state after it even when no log entry was applied. `SyncEngine.seeded` turns true as soon as
+the seed is read, even in a sync that then fails, so a caller can save when it changes. A download
+that fails is warned about once and tried again on the next sync, while the logs keep syncing. A
+seed that can't be read, or that the client refuses (`DownloadRefusedError`: a redirect, or over
+the size cap), is warned about and skipped. Saved state records the seed format it was read at
+(`seeded: 1`; `true` from earlier versions counts as 1), and a library with a newer
+`SEED_FORMAT` reads the seed again. Text that isn't valid UTF-8 is read with replacement
+characters. Pick-list entries in the seed aren't records of their own; the records that use them
+carry them, as synced records do.
 
 ## Command line
 
@@ -241,7 +263,10 @@ The tool signs in as a separate device named "Home Assistant (dev)". Its ID is m
 kept in `.pybabytracker-device.json` (gitignored). `--probe-history` reads every device's log
 from 0 and reports how many transactions come back versus its `LastSyncID`, the lowest and
 highest numbers returned, and a verdict (full, paged, paged newest first, starts at K with older
-numbers trimmed, duplicates, or gaps), then whether the probe device now appears in the device list. It only reads.
+numbers trimmed, duplicates, or gaps), then whether the probe device now appears in the device
+list. It only reads. History older than the logs is in the account's seed (see
+[The seed](#the-seed)), which the probe doesn't read; the default run reads it, so its latest
+records include it.
 
 `--write-test-diaper` adds one diaper for the test account's first baby and reports whether the
 dev device is in the device list before and after, with its `LastSyncID`, and whether the next

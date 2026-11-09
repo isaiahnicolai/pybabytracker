@@ -105,6 +105,7 @@ from .exceptions import (
     AccountChangedError,
     AuthenticationError,
     BabyTrackerError,
+    DownloadRefusedError,
     InvalidSelectionNameError,
     NoResponseError,
     NotOwnRecordError,
@@ -150,6 +151,7 @@ from .models import (
     encode_transaction,
     is_account_id,
 )
+from .seed import Seed, read_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
     BUILT_IN_MILESTONES,
@@ -163,6 +165,9 @@ from .selections import (
 _LOGGER = logging.getLogger(__name__)
 
 STATE_VERSION = 4
+# How this library reads a seed. Raise it when a fix reads more out of seeds: state saved at an
+# older format reads the seed again (records merge idempotently).
+SEED_FORMAT = 1
 
 _RANK_ADD, _RANK_UPDATE, _RANK_DELETE = 0, 1, 2
 _OP_RANKS = {OP_ADD: _RANK_ADD, OP_UPDATE: _RANK_UPDATE, OP_DELETE: _RANK_DELETE}
@@ -256,6 +261,9 @@ class SyncResult:
     devices_fetched: int = 0
     transactions_applied: int = 0
     transactions_skipped: int = 0
+    # This sync read the account's seed, or learned it has none: the state changed even if no
+    # log entry was applied, so save it.
+    seed_read: bool = False
 
 
 class SyncEngine:
@@ -284,11 +292,21 @@ class SyncEngine:
         self._own_updates: set[str] = set()  # objects this device posted an update (an end) to
         self._logged_unknown_types: set[str] = set()
         self._account_id: int | None = None
+        self._seeded = 0  # the seed format the account's seed was read at; 0 when it wasn't
+        self._seed_failed = False  # a download failed this run; warn once
         self._lock = asyncio.Lock()
 
     @property
     def device_uuid(self) -> str | None:
         return self._device_uuid
+
+    @property
+    def seeded(self) -> bool:
+        """Whether the account's seed has been read at this library's ``SEED_FORMAT``.
+
+        It turns true during a sync that reads the seed, even one that then fails, so a caller
+        that saves when it changes keeps the seed's records."""
+        return self._seeded >= SEED_FORMAT
 
     @property
     def account_id(self) -> int | None:
@@ -1037,6 +1055,10 @@ class SyncEngine:
             return result
 
     async def _sync(self, source: SyncSource) -> SyncResult:
+        seed_read = False
+        if not self.seeded:
+            await self._read_seed(source)
+            seed_read = self.seeded
         listed = await source.get_devices()
         self._check_account(source)
         devices = self.devices_to_fetch(listed)
@@ -1045,7 +1067,60 @@ class SyncEngine:
             result = await self._read_through(source, device.device_uuid, device.last_sync_id)
             applied += result.applied
             skipped += result.skipped
-        return SyncResult(len(devices), applied, skipped)
+        return SyncResult(len(devices), applied, skipped, seed_read)
+
+    async def _read_seed(self, source: SyncSource) -> None:
+        """Load the account's seed, once, if ``source`` can fetch it (``get_seed``).
+
+        A download that fails, or is redirected, is warned about and tried again on the next sync;
+        the logs still sync meanwhile. A seed that downloads but can't be read, or that is over
+        the client's size cap, is warned about and not tried again until a newer ``SEED_FORMAT``. A
+        rejected sign-in, or a sign-in to a different sync group, raises, as it would for the logs.
+        """
+        get_seed = getattr(source, "get_seed", None)
+        if get_seed is None:
+            return
+        try:
+            archive = await get_seed()
+        except (AuthenticationError, AccountChangedError):
+            raise
+        except DownloadRefusedError as err:
+            # An oversize seed would come back the same way on every sync.
+            _LOGGER.warning(
+                "Can't download the account's seed, so older history is missing: %s", err
+            )
+            self._seeded = SEED_FORMAT
+            return
+        except BabyTrackerError as err:
+            log = _LOGGER.debug if self._seed_failed else _LOGGER.warning
+            log("Couldn't download the account's seed; trying again next sync: %s", err)
+            self._seed_failed = True
+            return
+        self._check_account(source)  # never merge a seed from a different sync group
+        if archive:
+            try:
+                seed = await asyncio.to_thread(read_seed, archive)
+            except ProtocolError as err:
+                _LOGGER.warning(
+                    "Can't read the account's seed, so older history is missing: %s", err
+                )
+            else:
+                self.load_seed(seed)
+        self._seeded = SEED_FORMAT
+
+    def load_seed(self, seed: Seed) -> None:
+        """Merge a seed's records under the logs. No I/O.
+
+        Each seed record is stored as an add from no device, number 0, so the merge rules treat
+        it as older than any log entry with the same timestamp: a log copy of the record wins
+        unless its timestamp is older than the seed's, as between any two devices, and a delete
+        removes it unless the seed's copy is newer. Every log is still read from the start, as
+        the app does after loading a seed.
+        """
+        for record in seed.records:
+            stamp = record.timestamp.timestamp() if record.timestamp is not None else 0.0
+            self._store(record, _Version(stamp, _RANK_ADD, "", 0))
+        self._seeded = SEED_FORMAT
 
     async def _read_through(self, source: SyncSource, device_uuid: str, last: int) -> ApplyResult:
         """Read and apply a device's log page by page from what's been seen, until reaching
@@ -1192,6 +1267,7 @@ class SyncEngine:
             "created": sorted(self._created),
             "created_numbers": dict(sorted(self._add_numbers.items())),
             "own_updates": sorted(self._own_updates),
+            "seeded": self._seeded,
             "last_seen": dict(sorted(self._last_seen.items())),
             "account_id": self._account_id,
             "records": [
@@ -1246,6 +1322,8 @@ class SyncEngine:
         engine._own_updates = {str(i) for i in data.get("own_updates", [])}
         account_id = data.get("account_id")
         engine._account_id = account_id if is_account_id(account_id) else None
+        # State saved before seeds were read has none: the next sync reads it.
+        engine._seeded = _seed_format(data.get("seeded"))
         for entry in data["records"]:
             if version == 1:
                 record = decode_payload(entry)
@@ -1269,6 +1347,13 @@ class SyncEngine:
                 entry["version"], _RANK_DELETE
             )
         return engine
+
+
+def _seed_format(saved: object) -> int:
+    """The seed format saved state was read at. ``true`` is from before formats were saved."""
+    if saved is True:
+        return 1
+    return saved if isinstance(saved, int) and not isinstance(saved, bool) and saved > 0 else 0
 
 
 def _wanted(value: object, what: str) -> str:
