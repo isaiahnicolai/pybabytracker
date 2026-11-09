@@ -49,6 +49,9 @@ engine's own device:
   A post is never resent blindly.
 - A retry of the same logical add can pass the same ``object_id``. If the earlier attempt
   landed after all, the existing record is returned instead of posting a second copy.
+- Object ids match whatever their case, because Android writes lowercase UUIDs and iOS uppercase
+  ones. A write acts on the stored id's case, and an add whose id equals another device's
+  record's id apart from case is refused with ``ObjectIdInUseError``.
 - A confirmed write is applied to local state at once, under its own number, so the next sync
   sees nothing new from this device and doesn't fetch or reapply it.
 - Writes and syncs share one lock, so concurrent writes get consecutive numbers.
@@ -77,7 +80,7 @@ import asyncio
 import logging
 import time as _time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -367,8 +370,9 @@ class SyncEngine:
         (-18000 for Eastern in July and January), so for a record that matches it pass
         ``standard_offset_seconds(tz, time)``. ``object_id`` defaults to a new uppercase UUID4.
         Pass the same one to retry a write that raised: if that write landed after all, its
-        record is returned and nothing is posted. Every ``add_*`` method shares these rules. Bad
-        input raises ``ValueError`` before any request.
+        record is returned and nothing is posted. An id matches whatever its case, and one equal
+        to another device's id apart from case raises ``ObjectIdInUseError``. Every ``add_*``
+        method shares these rules. Bad input raises ``ValueError`` before any request.
         """
         draft = draft_diaper(status, time=time, timezone_offset=timezone_offset, note=note)
         return await self._add(target, baby_id, draft, object_id)
@@ -714,10 +718,14 @@ class SyncEngine:
         for a finished sleep. A finished sleep this device ended (its own end update is in this
         device's log, whatever other devices edited since) is returned as is with nothing posted,
         so a retry after a write that landed late, or a second call racing the first, is safe.
+
+        ``object_id`` can be in either case: a sleep started on an Android phone has a lowercase
+        id and one from iOS an uppercase id, and the update is posted under the id the record
+        already has.
         """
-        object_id = object_id.upper()
         async with self._lock:
             self._check_can_write(target)
+            object_id = self._resolve_id(object_id, self._records, self._tombstones) or object_id
             sleep, ended = self._endable(object_id)
             if ended:
                 return sleep
@@ -761,6 +769,23 @@ class SyncEngine:
             return record, True
         raise TimerNotRunningError(f"sleep {object_id} isn't running")
 
+    def _resolve_id(self, object_id: str, *held: Collection[str]) -> str | None:
+        """The id the engine holds for ``object_id``, whatever its case, or ``None``.
+
+        Android writes lowercase UUIDs and iOS uppercase ones, and records are kept under the id
+        exactly as received, so an id a caller passes can differ from the stored one only in
+        case. An exact match wins. Otherwise a stored id that is equal when upper-cased is
+        returned. ``None`` means none of ``held`` has the id in any case.
+        """
+        if any(object_id in ids for ids in held):
+            return object_id
+        wanted = object_id.upper()
+        for ids in held:
+            for stored in ids:
+                if stored.upper() == wanted:
+                    return stored
+        return None
+
     async def _add[R: Record](
         self,
         target: WriteTarget,
@@ -770,8 +795,6 @@ class SyncEngine:
     ) -> R:
         """The shared write path of every add: number, post, confirm, apply. ``baby_id`` is
         ``None`` for a record that belongs to the account, not a baby (a pump)."""
-        if object_id is not None:
-            object_id = object_id.upper()
         async with self._lock:
             self._check_can_write(target)
             baby = None
@@ -785,6 +808,12 @@ class SyncEngine:
                 # so a write that waited behind a sync posts the current ones.
                 draft = draft()
             if object_id is not None:
+                # An id the engine already holds keeps the case it has; a new one is written in
+                # uppercase, like the ids the library generates.
+                object_id = (
+                    self._resolve_id(object_id, self._created, self._records, self._tombstones)
+                    or object_id.upper()
+                )
                 if object_id in self._created:
                     existing = self._records.get(object_id)
                     if isinstance(existing, draft.record_type):
@@ -806,10 +835,12 @@ class SyncEngine:
         The payload is the record exactly as last saved with ``newFlage`` set to ``"false"``;
         like the app, the timestamp is not bumped. Raises ``NotOwnRecordError`` for a record
         another device created (or one never seen), and ``RecordNotFoundError`` if this
-        device's record is already deleted.
+        device's record is already deleted. ``object_id`` matches whatever its case, and the delete
+        is posted under the id the record has.
         """
         async with self._lock:
             self._check_can_write(target)
+            object_id = self._resolve_id(object_id, self._created, self._records) or object_id
             if object_id not in self._created:
                 raise NotOwnRecordError(f"record {object_id} wasn't created by this device")
             if object_id not in self._records:
