@@ -4,6 +4,7 @@ from ._version import __version__
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
+    AccountChangedError,
     AmbiguousSelectionError,
     AmountTooSmallError,
     AuthenticationError,
@@ -101,6 +102,7 @@ __all__ = [
     "MEDIA_PHOTO",
     "MEDIA_VIDEO",
     "Picture",
+    "AccountChangedError",
     "Allergen",
     "AmbiguousSelectionError",
     "AmountTooSmallError",

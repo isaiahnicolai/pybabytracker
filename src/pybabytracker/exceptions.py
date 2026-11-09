@@ -25,6 +25,27 @@ class ProtocolError(BabyTrackerError):
     """The service answered, but not in the shape PROTOCOL.md describes."""
 
 
+class AccountChangedError(BabyTrackerError):
+    """A sign-in opened a different sync group (``AccountID``) from the one already in use.
+
+    The app compares the ``AccountID`` from each sign-in with the one it stored, and stops
+    syncing when they differ: the group was reset or recreated, so the saved records and progress
+    belong to the old one. The client raises this for a sign-in that differs from its own earlier
+    one, before it retries the request that needed the sign-in, and the engine raises it when the
+    ``AccountID`` differs from the one in its state. Join the new group with a new
+    ``BabyTrackerClient`` and a new engine (the aiohttp session can be reused).
+    Records read before the sign-in are not undone.
+    """
+
+    def __init__(self, saved: int, signed_in: int) -> None:
+        super().__init__(
+            f"the account's sync group changed (AccountID {saved} is now {signed_in}); "
+            "use a new client and a new engine to join it"
+        )
+        self.saved = saved
+        self.signed_in = signed_in
+
+
 class TransactionDecodeError(BabyTrackerError):
     """A transaction's payload could not be decoded into a record."""
 

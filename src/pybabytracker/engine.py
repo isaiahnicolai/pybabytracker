@@ -98,6 +98,7 @@ from .builders import (
 )
 from .client import Device, RawTransaction
 from .exceptions import (
+    AccountChangedError,
     AuthenticationError,
     BabyTrackerError,
     InvalidSelectionNameError,
@@ -141,6 +142,7 @@ from .models import (
     decode_payload,
     decode_transaction,
     encode_transaction,
+    is_account_id,
 )
 from .selections import (
     BUILT_IN_MILESTONES,
@@ -274,11 +276,31 @@ class SyncEngine:
         self._add_numbers: dict[str, int] = {}  # object_id -> number of this device's add
         self._own_updates: set[str] = set()  # objects this device posted an update (an end) to
         self._logged_unknown_types: set[str] = set()
+        self._account_id: int | None = None
         self._lock = asyncio.Lock()
 
     @property
     def device_uuid(self) -> str | None:
         return self._device_uuid
+
+    @property
+    def account_id(self) -> int | None:
+        """The sync group's ``AccountID`` this state came from, once a sync has seen one."""
+        return self._account_id
+
+    def _check_account(self, source: SyncSource) -> None:
+        """Remember the group's ``AccountID``, or refuse a different one.
+
+        A source that doesn't sign in (a test double, a file) has no ``account_id`` and is
+        trusted. Call it after a request, so the client has signed in by then.
+        """
+        account_id = getattr(source, "account_id", None)
+        if not is_account_id(account_id):
+            return
+        if self._account_id is None:
+            self._account_id = account_id
+        elif account_id != self._account_id:
+            raise AccountChangedError(self._account_id, account_id)
 
     @property
     def records(self) -> Mapping[str, Record]:
@@ -821,6 +843,7 @@ class SyncEngine:
         number. Hold the lock."""
         own = self._require_device()
         server_last = await self._server_last(target)
+        self._check_account(target)
         pending = self._pending
         if pending is not None:
             # If anything now holds the pending number (that post, landed late, or another
@@ -848,8 +871,8 @@ class SyncEngine:
         self._pending = _Pending(number, op_code, transaction)
         try:
             await target.post_transaction(op_code, number, transaction)
-        except AuthenticationError:
-            self._pending = None  # rejected outright: nothing landed
+        except (AuthenticationError, AccountChangedError):
+            self._pending = None  # refused before it was sent: nothing landed
             raise
         except BabyTrackerError as err:
             # Did it land anyway? Only the exact transaction under this number counts.
@@ -919,7 +942,9 @@ class SyncEngine:
             return result
 
     async def _sync(self, source: SyncSource) -> SyncResult:
-        devices = self.devices_to_fetch(await source.get_devices())
+        listed = await source.get_devices()
+        self._check_account(source)
+        devices = self.devices_to_fetch(listed)
         applied = skipped = 0
         for device in devices:
             result = await self._read_through(source, device.device_uuid, device.last_sync_id)
@@ -934,6 +959,7 @@ class SyncEngine:
         applied = skipped = 0
         while (since := self._last_seen.get(device_uuid, 0)) < last:
             transactions = await source.get_transactions(device_uuid, since)
+            self._check_account(source)  # a sign-in during the read may have joined a new group
             result = self.apply(device_uuid, transactions)
             applied += result.applied
             skipped += result.skipped
@@ -1072,6 +1098,7 @@ class SyncEngine:
             "created_numbers": dict(sorted(self._add_numbers.items())),
             "own_updates": sorted(self._own_updates),
             "last_seen": dict(sorted(self._last_seen.items())),
+            "account_id": self._account_id,
             "records": [
                 {"version": self._versions[i].to_dict(), "payload": r.to_payload()}
                 for i, r in sorted(self._records.items())
@@ -1122,6 +1149,8 @@ class SyncEngine:
             if str(i) in engine._created
         }
         engine._own_updates = {str(i) for i in data.get("own_updates", [])}
+        account_id = data.get("account_id")
+        engine._account_id = account_id if is_account_id(account_id) else None
         for entry in data["records"]:
             if version == 1:
                 record = decode_payload(entry)
