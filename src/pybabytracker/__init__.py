@@ -1,7 +1,7 @@
 """Async client for the Nighp Baby Tracker sync service."""
 
 from ._version import __version__
-from .builders import MAX_ACTIVITY_MINUTES
+from .builders import MAX_ACTIVITY_MINUTES, MAX_OTHER_FEED_AMOUNT
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
@@ -29,6 +29,7 @@ from .exceptions import (
     TransactionDecodeError,
     UnknownActivityError,
     UnknownBabyError,
+    UnknownFoodError,
     UnknownMedicineError,
     UnknownMilestoneError,
     UnknownSelectionError,
@@ -99,6 +100,7 @@ from .models import (
 from .seed import Seed, read_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
+    BUILT_IN_FOODS,
     BUILT_IN_MILESTONES,
     BUILT_IN_VACCINES,
     SelectionChoice,
@@ -109,6 +111,7 @@ from .totals import DayTotals, LastBreast, day_totals, last_breast
 
 __all__ = [
     "MAX_ACTIVITY_MINUTES",
+    "MAX_OTHER_FEED_AMOUNT",
     "MEDIA_PHOTO",
     "MEDIA_VIDEO",
     "Picture",
@@ -120,6 +123,7 @@ __all__ = [
     "ApplyResult",
     "AuthenticationError",
     "BUILT_IN_ACTIVITIES",
+    "BUILT_IN_FOODS",
     "BUILT_IN_MILESTONES",
     "BUILT_IN_VACCINES",
     "Baby",
@@ -195,6 +199,7 @@ __all__ = [
     "UNIT_OUNCES",
     "UNIT_POUNDS",
     "UnknownBabyError",
+    "UnknownFoodError",
     "UnknownActivityError",
     "UnknownMedicineError",
     "UnknownMilestoneError",
