@@ -1,7 +1,7 @@
 """Async client for the Nighp Baby Tracker sync service."""
 
 from ._version import __version__
-from .builders import MAX_ACTIVITY_MINUTES
+from .builders import MAX_ACTIVITY_MINUTES, TEMPERATURE_RANGES
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
@@ -183,6 +183,7 @@ __all__ = [
     "SyncEngine",
     "SyncResult",
     "SyncSource",
+    "TEMPERATURE_RANGES",
     "Temperature",
     "TimerNotRunningError",
     "TransactionDecodeError",

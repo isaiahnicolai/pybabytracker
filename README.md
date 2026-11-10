@@ -98,6 +98,7 @@ key.
 | `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
 | `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 | `add_activity(client, baby_id, activity, duration=0, ...)` | `OtherActivity` | tummy time, a bath, and so on; `activity` is a name or ID from `activity_choices()` |
+| `add_temperature(client, baby_id, temperature, ...)` | `Temperature` | `Measurement(value, "F")` or `Measurement(value, "C")`, written as given; must be in `TEMPERATURE_RANGES` |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
