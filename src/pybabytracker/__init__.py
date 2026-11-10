@@ -1,7 +1,7 @@
 """Async client for the Nighp Baby Tracker sync service."""
 
 from ._version import __version__
-from .builders import MAX_ACTIVITY_MINUTES, MAX_OTHER_FEED_AMOUNT
+from .builders import MAX_ACTIVITY_MINUTES, MAX_FOOD_NAME_LENGTH, MAX_OTHER_FEED_AMOUNT
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
@@ -23,6 +23,7 @@ from .exceptions import (
     ObjectIdInUseError,
     ProtocolError,
     RecordNotFoundError,
+    SelectionExistsError,
     SleepStartOutOfRangeError,
     SleepTooLongError,
     TimerNotRunningError,
@@ -80,6 +81,7 @@ from .models import (
     NursingSession,
     OtherActivity,
     OtherFeed,
+    OtherFeedSelection,
     Picture,
     Pump,
     Pumped,
@@ -111,6 +113,7 @@ from .totals import DayTotals, LastBreast, day_totals, last_breast
 
 __all__ = [
     "MAX_ACTIVITY_MINUTES",
+    "MAX_FOOD_NAME_LENGTH",
     "MAX_OTHER_FEED_AMOUNT",
     "MEDIA_PHOTO",
     "MEDIA_VIDEO",
@@ -167,6 +170,7 @@ __all__ = [
     "ObjectIdInUseError",
     "OtherActivity",
     "OtherFeed",
+    "OtherFeedSelection",
     "ProtocolError",
     "Pump",
     "PumpTimer",
@@ -175,6 +179,7 @@ __all__ = [
     "RawTransaction",
     "Record",
     "RecordNotFoundError",
+    "SelectionExistsError",
     "SIDE_LEFT",
     "SIDE_NONE",
     "SIDE_RIGHT",

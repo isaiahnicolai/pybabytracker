@@ -99,6 +99,7 @@ key.
 | `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 | `add_activity(client, baby_id, activity, duration=0, ...)` | `OtherActivity` | tummy time, a bath, and so on; `activity` is a name or ID from `activity_choices()` |
 | `add_other_feed(client, baby_id, food, amount=, unit=, meal_id=None, ...)` | `OtherFeed` | a solid food (or water, juice); `food` is a name or ID from `food_choices()`, `amount` counts `unit` (free text: "Oz", "Pieces", "Tsp") |
+| `add_food(client, name, bottle=False)` | `OtherFeedSelection` | a new food for the pick list, posted before the first solid food that names it; belongs to the account, so no `baby_id` |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
@@ -124,6 +125,11 @@ key.
   unit, as the iPhone app does; read it back with `quantity` and `unit`. Foods eaten together
   share a meal (`meal_id`, the `objectID` of the record's `desc`): log the first, then pass its
   `meal_id` for the rest. Without one, each food is its own meal.
+- `add_food` adds a food to the pick list the way both apps do: an `OtherFeedSelection` of its
+  own (`name`, `bottle`, `newFlage` "true", no record fields), posted before the first solid
+  food that names it. A name already on the list, ignoring case, raises `SelectionExistsError`
+  with the existing food's `object_id`. A solid food embeds its food as the iPhone app does:
+  `newFlage` "false" and the 1970 timestamp, so the old copy never replaces a newer edit.
 - Where several records carry a copy of one entry, a synced copy wins, then the copy in the
   newest record (by its `timestamp`, then its `time`), so a dose's default amount is the usual
   dose of the newest dose. A medicine without a usual dose that is a number above zero needs an
