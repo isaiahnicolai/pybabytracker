@@ -42,8 +42,17 @@ async with aiohttp.ClientSession() as session:
   new `BabyTrackerClient` and a new engine (the aiohttp session can be reused). State saved before
   this version adopts the first `AccountID` it sees, so a reset that happened before upgrading
   isn't detected.
-- Records are typed (`Diaper`, `Sleep`, `Nursing`, and so on). A record type the library
+- Records are typed. Every type the apps sync is read: `Diaper`, `Formula`, `Pumped`,
+  `Nursing`, `Sleep`, `Pump`, `OtherFeed` (solids), `Medication`, `Medicine`, `Temperature`,
+  `Growth`, `Milestone`, `Vaccine`, `OtherActivity`, `Bath`, `Allergen`, `Sick`,
+  `HealthQuestion`, `DoctorVisit`, `Joy`, `Journal`, and `Baby`, plus the pick lists
+  `MedicationSelection`, `MilestoneSelection`, and `VaccineSelection`. The ones you can add are
+  listed under [Record types you can add](#record-types-you-can-add). A record type the library
   doesn't know stays raw as an `UnknownRecord` (a debug line is logged once per type).
+- Measurements read as `Measurement(value, unit)`: `Temperature.reading` (`"F"` or `"C"`), and
+  `Growth.weight_reading` (`"lb"` or `"kg"`, decimal pounds), `length_reading`, and
+  `head_reading` (`"in"` or `"cm"`). Each reads the synced shape or the seed's database columns,
+  and is `None` when the record has no such measurement.
   `Medication` is a medicine dose with the medicine embedded, and `NursingSession`, the Android
   app's timed nursing, is a `Nursing`. The Android app sends codes such as a diaper's `status` as
   strings of digits and `englishMeasure` as a JSON boolean; `numeric_code()` reads either form,
