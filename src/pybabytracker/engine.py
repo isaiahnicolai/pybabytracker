@@ -90,12 +90,14 @@ from .builders import (
     draft_activity,
     draft_bottle,
     draft_diaper,
+    draft_growth,
     draft_medication,
     draft_milestone,
     draft_nursing,
     draft_pump,
     draft_sleep,
     draft_sleep_start,
+    draft_temperature,
     draft_vaccine,
     ended_sleep_payload,
     resolve_sleep_end,
@@ -132,6 +134,8 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Growth,
+    Measurement,
     Medication,
     MedicationSelection,
     Milestone,
@@ -142,6 +146,7 @@ from .models import (
     Pumped,
     Record,
     Sleep,
+    Temperature,
     UnknownRecord,
     Vaccine,
     VaccineSelection,
@@ -553,6 +558,58 @@ class SyncEngine:
 
         resolve()
         return await self._add(target, baby_id, resolve, object_id)
+
+    async def add_growth(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        *,
+        weight: Measurement | None = None,
+        length: Measurement | None = None,
+        head: Measurement | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Growth:
+        """Post a growth measurement: any of ``weight`` (``"lb"`` or ``"kg"``), ``length``, and
+        ``head`` (``"in"`` or ``"cm"``), each a ``Measurement``, at least one given.
+
+        Units are not converted and numbers are rounded to two decimals. A weight in pounds is
+        decimal pounds (9 lb 4 oz is 9.25). Length and head must share a unit, and each must be
+        in ``GROWTH_RANGES``. The other arguments work as for ``add_diaper``.
+        """
+        draft = draft_growth(
+            weight=weight,
+            length=length,
+            head=head,
+            time=time,
+            timezone_offset=timezone_offset,
+            note=note,
+        )
+        return await self._add(target, baby_id, draft, object_id)
+
+    async def add_temperature(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        temperature: Measurement,
+        *,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Temperature:
+        """Post a temperature, ``Measurement(value, "F")`` or ``Measurement(value, "C")``.
+
+        The unit is not converted and the number is rounded to two decimals. It must be in
+        ``TEMPERATURE_RANGES`` for its unit, so a Celsius reading passed as Fahrenheit is
+        refused. The other arguments work as for ``add_diaper``.
+        """
+        draft = draft_temperature(
+            temperature, time=time, timezone_offset=timezone_offset, note=note
+        )
+        return await self._add(target, baby_id, draft, object_id)
 
     def activity_choices(self) -> list[SelectionChoice]:
         """Every activity type a record can name: the app's built-ins in its order, then added
