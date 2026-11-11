@@ -38,19 +38,30 @@ from .models import (
     SIDE_LEFT,
     SIDE_NONE,
     SIDE_RIGHT,
+    UNIT_CELSIUS,
+    UNIT_CENTIMETERS,
+    UNIT_FAHRENHEIT,
+    UNIT_INCHES,
+    UNIT_KILOGRAMS,
     UNIT_MILLILITERS,
     UNIT_OUNCES,
+    UNIT_POUNDS,
     Baby,
     Diaper,
     Formula,
+    Growth,
+    Measurement,
     Medication,
     Milestone,
     Nursing,
     OtherActivity,
+    OtherFeed,
+    OtherFeedSelection,
     Pump,
     Pumped,
     Record,
     Sleep,
+    Temperature,
     Vaccine,
     Volume,
     VolumeMeasure,
@@ -248,6 +259,224 @@ def draft_activity(
         )
 
     return Draft(OtherActivity, build)
+
+
+def _checked_measure(
+    name: str,
+    reading: object,
+    ranges: Mapping[str, tuple[float, float]],
+    object_type: str,
+    english_units: set[str],
+) -> dict[str, Any]:
+    """A checked measurement as the iPhone app syncs one: ``object_type``, ``englishMeasure``
+    "true" for a unit in ``english_units`` and "false" otherwise, and the number rounded as
+    ``_number`` does. Refuses anything but a ``Measurement`` of a unit in ``ranges``, a finite
+    number (not a bool), within that unit's range.
+    """
+    if not isinstance(reading, Measurement):
+        raise ValueError(f"{name} must be a Measurement(value, unit)")
+    if reading.unit not in ranges:
+        units = " or ".join(repr(unit) for unit in ranges)
+        raise ValueError(f"unknown {name} unit {reading.unit!r}: use {units}")
+    value = reading.value
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    low, high = ranges[reading.unit]
+    if not low <= value <= high:
+        raise ValueError(
+            f"a {name} in {reading.unit} must be from {low:g} to {high:g}, not {value:g}"
+        )
+    return {
+        "BCObjectType": object_type,
+        "englishMeasure": "true" if reading.unit in english_units else "false",
+        "value": _number(value),
+    }
+
+
+# What each growth measurement may be, by unit: from a premature newborn to a child, as a guard
+# against a typo or a measurement passed in the wrong field. The metric bounds match the
+# imperial ones, so a reading near a limit is treated the same in either unit.
+GROWTH_RANGES: dict[str, dict[str, tuple[float, float]]] = {
+    "weight": {UNIT_POUNDS: (0.5, 100.0), UNIT_KILOGRAMS: (0.23, 45.0)},
+    "length": {UNIT_INCHES: (5.0, 60.0), UNIT_CENTIMETERS: (12.7, 152.0)},
+    "head": {UNIT_INCHES: (5.0, 30.0), UNIT_CENTIMETERS: (12.7, 76.0)},
+}
+_GROWTH_MEASURES = {"weight": "WeightMeasure", "length": "LengthMeasure", "head": "LengthMeasure"}
+_GROWTH_US_UNITS = {UNIT_POUNDS, UNIT_INCHES}
+
+
+def draft_growth(
+    *,
+    weight: Measurement | None,
+    length: Measurement | None,
+    head: Measurement | None,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Growth]:
+    """A growth measurement of any of weight, length, and head (at least one).
+
+    Each is a ``WeightMeasure`` or ``LengthMeasure`` with ``englishMeasure`` "true" for pounds
+    or inches, the number rounded to two decimals (a whole number is written as an integer). A
+    weight in pounds is decimal pounds, as the apps store it (9 lb 4 oz is 9.25). One not taken
+    is left out, as in the account seed, since the apps read 0 as not measured. Length and head
+    share one unit in the apps, so they must share it here.
+    """
+    given = {"weight": weight, "length": length, "head": head}
+    measures = {
+        name: _checked_measure(
+            name, reading, GROWTH_RANGES[name], _GROWTH_MEASURES[name], _GROWTH_US_UNITS
+        )
+        for name, reading in given.items()
+        if reading is not None
+    }
+    if not measures:
+        raise ValueError("give at least one of weight, length, and head")
+    if length is not None and head is not None and length.unit != head.unit:
+        raise ValueError("length and head must be in the same unit")
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Growth:
+        # Each record gets its own copy of every measure.
+        own = {name: dict(measure) for name, measure in measures.items()}
+        return Growth(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            weight=own.get("weight"),
+            length=own.get("length"),
+            head=own.get("head"),
+        )
+
+    return Draft(Growth, build)
+
+
+# The temperatures a reading may be, by unit: a body's, with room to spare. A guard against a
+# Celsius number given as Fahrenheit (37 °F) or the reverse (98.6 °C).
+TEMPERATURE_RANGES: dict[str, tuple[float, float]] = {
+    UNIT_FAHRENHEIT: (86.0, 113.0),
+    UNIT_CELSIUS: (30.0, 45.0),
+}
+
+
+def draft_temperature(
+    reading: Measurement,
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[Temperature]:
+    """A temperature, written as the iPhone app syncs one: a ``TemperatureMeasure`` with
+    ``englishMeasure`` "true" for Fahrenheit and "false" for Celsius, the number rounded to two
+    decimals (a whole number is written as an integer)."""
+    measure = _checked_measure(
+        "temperature", reading, TEMPERATURE_RANGES, "TemperatureMeasure", {UNIT_FAHRENHEIT}
+    )
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Temperature:
+        return Temperature(
+            **_base(object_id, baby, timestamp, event, tz, text), temperature=dict(measure)
+        )
+
+    return Draft(Temperature, build)
+
+
+# The largest solid food amount: a guard against a typo, since the unit is free text, not a limit
+# the app is known to enforce.
+MAX_OTHER_FEED_AMOUNT = 1000
+# The longest unit, in characters (a guard).
+MAX_UNIT_LENGTH = 30
+# The timestamp the iPhone app gives a meal's description and an embedded food.
+_EMBEDDED_TIMESTAMP = "1970-01-01 00:00:00 +0000"
+
+
+def draft_other_feed(
+    selection: Mapping[str, Any],
+    *,
+    amount: float,
+    unit: str,
+    meal_id: str,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+) -> Draft[OtherFeed]:
+    """A solid food (or a drink other than milk), embedding the food as ``feedType``.
+
+    ``amount`` counts ``unit``, which is free text such as "Oz", "Pieces", or "Tsp". The iPhone
+    app writes the amount as a ``VolumeMeasure`` with ``englishMeasure`` "true" whatever the
+    unit, so this does too. ``desc`` is the meal: an unnamed ``FeedDescription`` whose
+    ``objectID`` is shared by the foods logged together, as the app does, so give each food of
+    one meal the same ``meal_id``.
+    """
+    if isinstance(amount, bool) or not isinstance(amount, int | float):
+        raise ValueError("amount must be a number")
+    if not math.isfinite(amount) or _number(amount) <= 0:
+        raise ValueError("amount must be more than zero")
+    if amount > MAX_OTHER_FEED_AMOUNT:
+        raise ValueError(f"amount can't be more than {MAX_OTHER_FEED_AMOUNT}")
+    if not isinstance(unit, str) or not unit.strip():
+        raise ValueError("unit must be text, such as 'Oz' or 'Pieces'")
+    if len(unit.strip()) > MAX_UNIT_LENGTH:
+        raise ValueError(f"unit can't be longer than {MAX_UNIT_LENGTH} characters")
+    if not isinstance(meal_id, str) or not meal_id.strip():
+        raise ValueError("meal_id must be text")
+    # As the iPhone app embeds a food: typed, not new, and dated 1970.
+    embedded = {
+        "BCObjectType": "OtherFeedSelection",
+        **selection,
+        "newFlage": "false",
+        "timestamp": _EMBEDDED_TIMESTAMP,
+    }
+    written_unit = unit.strip()
+    value = _number(amount)
+    desc = {
+        "BCObjectType": "FeedDescription",
+        "newFlage": "true",
+        "objectID": meal_id.strip(),
+        "timestamp": _EMBEDDED_TIMESTAMP,
+    }
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherFeed:
+        return OtherFeed(
+            **_base(object_id, baby, timestamp, event, tz, text),
+            feed_type=dict(embedded),
+            desc=dict(desc),
+            amount=VolumeMeasure(value, "true"),
+            unit=written_unit,
+        )
+
+    return Draft(OtherFeed, build)
+
+
+# The longest name of a food added to the pick list, in characters.
+MAX_FOOD_NAME_LENGTH = 50
+
+
+def draft_food(name: str, *, bottle: bool) -> Draft[OtherFeedSelection]:
+    """A new food for the pick list, as both apps sync one: ``BCObjectType``, ``objectID``,
+    ``name``, ``bottle``, ``newFlage`` "true", and ``timestamp``, with no record fields.
+
+    ``bottle`` true offers it on the bottle screen as a drink. The name is written without
+    surrounding spaces.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("a food's name must be text")
+    written = name.strip()
+    if len(written) > MAX_FOOD_NAME_LENGTH:
+        raise ValueError(f"a food's name can't be longer than {MAX_FOOD_NAME_LENGTH} characters")
+    if not isinstance(bottle, bool):
+        raise ValueError("bottle must be True or False")
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherFeedSelection:
+        return OtherFeedSelection(
+            object_id=object_id,
+            name=written,
+            bottle="true" if bottle else "false",
+            new_flag="true",
+            timestamp=timestamp,
+        )
+
+    return Draft(OtherFeedSelection, build)
 
 
 def _usual_dose(selection: Mapping[str, Any]) -> int | float | None:

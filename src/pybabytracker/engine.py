@@ -90,12 +90,16 @@ from .builders import (
     draft_activity,
     draft_bottle,
     draft_diaper,
+    draft_food,
+    draft_growth,
     draft_medication,
     draft_milestone,
     draft_nursing,
+    draft_other_feed,
     draft_pump,
     draft_sleep,
     draft_sleep_start,
+    draft_temperature,
     draft_vaccine,
     ended_sleep_payload,
     resolve_sleep_end,
@@ -113,10 +117,12 @@ from .exceptions import (
     ObjectIdInUseError,
     ProtocolError,
     RecordNotFoundError,
+    SelectionExistsError,
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownActivityError,
     UnknownBabyError,
+    UnknownFoodError,
     UnknownMedicineError,
     UnknownMilestoneError,
     UnknownVaccineError,
@@ -132,16 +138,21 @@ from .models import (
     Baby,
     Diaper,
     Formula,
+    Growth,
+    Measurement,
     Medication,
     MedicationSelection,
     Milestone,
     MilestoneSelection,
     Nursing,
     OtherActivity,
+    OtherFeed,
+    OtherFeedSelection,
     Pump,
     Pumped,
     Record,
     Sleep,
+    Temperature,
     UnknownRecord,
     Vaccine,
     VaccineSelection,
@@ -154,6 +165,7 @@ from .models import (
 from .seed import Seed, read_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
+    BUILT_IN_FOODS,
     BUILT_IN_MILESTONES,
     BUILT_IN_VACCINES,
     SelectionChoice,
@@ -554,6 +566,58 @@ class SyncEngine:
         resolve()
         return await self._add(target, baby_id, resolve, object_id)
 
+    async def add_growth(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        *,
+        weight: Measurement | None = None,
+        length: Measurement | None = None,
+        head: Measurement | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Growth:
+        """Post a growth measurement: any of ``weight`` (``"lb"`` or ``"kg"``), ``length``, and
+        ``head`` (``"in"`` or ``"cm"``), each a ``Measurement``, at least one given.
+
+        Units are not converted and numbers are rounded to two decimals. A weight in pounds is
+        decimal pounds (9 lb 4 oz is 9.25). Length and head must share a unit, and each must be
+        in ``GROWTH_RANGES``. The other arguments work as for ``add_diaper``.
+        """
+        draft = draft_growth(
+            weight=weight,
+            length=length,
+            head=head,
+            time=time,
+            timezone_offset=timezone_offset,
+            note=note,
+        )
+        return await self._add(target, baby_id, draft, object_id)
+
+    async def add_temperature(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        temperature: Measurement,
+        *,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> Temperature:
+        """Post a temperature, ``Measurement(value, "F")`` or ``Measurement(value, "C")``.
+
+        The unit is not converted and the number is rounded to two decimals. It must be in
+        ``TEMPERATURE_RANGES`` for its unit, so a Celsius reading passed as Fahrenheit is
+        refused. The other arguments work as for ``add_diaper``.
+        """
+        draft = draft_temperature(
+            temperature, time=time, timezone_offset=timezone_offset, note=note
+        )
+        return await self._add(target, baby_id, draft, object_id)
+
     def activity_choices(self) -> list[SelectionChoice]:
         """Every activity type a record can name: the app's built-ins in its order, then added
         ones, by name. Copies are chosen as for ``milestone_choices``. A type added in the app
@@ -575,6 +639,110 @@ class SyncEngine:
         found = find_choice(self.activity_choices(), _wanted(activity, "activity"), "activity")
         if found is None:
             raise UnknownActivityError(f"no activity {activity!r} is built in or known from sync")
+        return found
+
+    async def add_other_feed(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        food: str,
+        *,
+        amount: float,
+        unit: str,
+        meal_id: str | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str = "",
+        object_id: str | None = None,
+    ) -> OtherFeed:
+        """Post a solid food (or a drink such as water or juice), and apply it locally.
+
+        ``food`` is a name or ID from ``food_choices()``: one of the app's built-in foods
+        (``BUILT_IN_FOODS``) or one added in the app and known from sync, matched as for
+        ``add_milestone``. ``amount`` (more than zero, at most ``MAX_OTHER_FEED_AMOUNT``) counts
+        ``unit``, free text such as "Oz", "Pieces", or "Tsp" (surrounding spaces dropped).
+        Foods eaten together share a meal: log the first, then pass its ``meal_id`` when
+        logging the rest. It defaults to a new one. Bad input raises the errors
+        ``add_milestone`` does (``UnknownFoodError`` for an unknown food) or ``ValueError``,
+        before any request; ``add_food`` adds a new food to the pick list. The food is embedded
+        as the iPhone app embeds one: ``newFlage`` "false" and the 1970 timestamp. The other
+        arguments work as for ``add_diaper``.
+        """
+        self._check_baby(target, baby_id)
+        meal = meal_id if meal_id is not None else str(uuid.uuid4()).upper()
+
+        def resolve() -> Draft[OtherFeed]:
+            choice = self.find_food(food)
+            return draft_other_feed(
+                choice.selection,
+                amount=amount,
+                unit=unit,
+                meal_id=meal,
+                time=time,
+                timezone_offset=timezone_offset,
+                note=note,
+            )
+
+        resolve()
+        return await self._add(target, baby_id, resolve, object_id)
+
+    async def add_food(
+        self,
+        target: WriteTarget,
+        name: str,
+        *,
+        bottle: bool = False,
+        object_id: str | None = None,
+    ) -> OtherFeedSelection:
+        """Add a food to the account's pick list, and apply it locally.
+
+        The food is posted as its own ``OtherFeedSelection``, as both apps do before the first
+        solid food that names it, so log that with ``add_other_feed`` and the returned record's
+        ``object_id``. ``bottle`` True offers it as a drink on the bottle screen. ``name`` is
+        written without surrounding spaces, at most ``MAX_FOOD_NAME_LENGTH`` characters. A name
+        already on the list (ignoring case, built-in or not) raises ``SelectionExistsError``
+        with that food's ID, and a bad name or ``bottle`` ``ValueError``, before any request.
+        The food belongs to the account, not a baby. ``object_id`` works as for ``add_diaper``.
+        """
+
+        def resolve() -> Draft[OtherFeedSelection]:
+            draft = draft_food(name, bottle=bottle)
+            wanted = name.strip().casefold()
+            for choice in self.food_choices():
+                # A retry names the food that landed, whatever the case of its id.
+                is_retry = (
+                    object_id is not None
+                    and self._resolve_id(object_id, (choice.object_id,)) is not None
+                )
+                if choice.name.strip().casefold() == wanted and not is_retry:
+                    raise SelectionExistsError("food", name.strip(), choice.object_id)
+            return draft
+
+        resolve()
+        return await self._add(target, None, resolve, object_id)
+
+    def food_choices(self) -> list[SelectionChoice]:
+        """Every food a solid food record can name: the app's built-ins in its order, then
+        added ones, by name. Copies are chosen as for ``milestone_choices``. A food added in the
+        app syncs as its own ``OtherFeedSelection`` record and is embedded in each record of it
+        as ``feedType``; either makes it a choice, even a synced one this library can't decode.
+        A food only in the account's seed, not yet used by a record, is not.
+        """
+        synced = [
+            r.to_payload() for r in self._records.values() if r.record_type == "OtherFeedSelection"
+        ]
+        embedded = [
+            embedded_copy(r, r.feed_type)
+            for r in self._records.values()
+            if isinstance(r, OtherFeed)
+        ]
+        return merged_choices(BUILT_IN_FOODS, embedded, synced)
+
+    def find_food(self, food: str) -> SelectionChoice:
+        """The food with that ID, or else that name; errors as for ``find_milestone``."""
+        found = find_choice(self.food_choices(), _wanted(food, "food"), "food")
+        if found is None:
+            raise UnknownFoodError(f"no food {food!r} is built in or known from sync")
         return found
 
     async def add_medication(

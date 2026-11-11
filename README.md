@@ -42,13 +42,26 @@ async with aiohttp.ClientSession() as session:
   new `BabyTrackerClient` and a new engine (the aiohttp session can be reused). State saved before
   this version adopts the first `AccountID` it sees, so a reset that happened before upgrading
   isn't detected.
-- Records are typed (`Diaper`, `Sleep`, `Nursing`, and so on). A record type the library
+- `AccountResetError` (an `AccountChangedError`) means the service refused this device at sign-in
+  because the account was reset: after a reset it refuses every device that joined before it,
+  whatever the password, so it isn't an `AuthenticationError`. Join again as the app does, with a
+  new device UUID, a new client and a new engine.
+- Records are typed. Every type the apps sync is read: `Diaper`, `Formula`, `Pumped`,
+  `Nursing`, `Sleep`, `Pump`, `OtherFeed` (solids), `Medication`, `Medicine`, `Temperature`,
+  `Growth`, `Milestone`, `Vaccine`, `OtherActivity`, `Bath`, `Allergen`, `Sick`,
+  `HealthQuestion`, `DoctorVisit`, `Joy`, `Journal`, and `Baby`, plus the pick lists
+  `MedicationSelection`, `MilestoneSelection`, and `VaccineSelection`. The ones you can add are
+  listed under [Record types you can add](#record-types-you-can-add). A record type the library
   doesn't know stays raw as an `UnknownRecord` (a debug line is logged once per type).
   `Medication` is a medicine dose with the medicine embedded, and `NursingSession`, the Android
   app's timed nursing, is a `Nursing`. The Android app sends codes such as a diaper's `status` as
   strings of digits and `englishMeasure` as a JSON boolean; `numeric_code()` reads either form,
   and volumes read both. Decoding then encoding any
   payload returns the same JSON, including keys the library doesn't model.
+- Measurements read as `Measurement(value, unit)`: `Temperature.reading` (`"F"` or `"C"`), and
+  `Growth.weight_reading` (`"lb"` or `"kg"`, decimal pounds), `length_reading`, and
+  `head_reading` (`"in"` or `"cm"`). Each is `None` when the record has no such
+  measurement.
 
 ## Writes
 
@@ -98,6 +111,10 @@ key.
 | `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
 | `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 | `add_activity(client, baby_id, activity, duration=0, ...)` | `OtherActivity` | tummy time, a bath, and so on; `activity` is a name or ID from `activity_choices()` |
+| `add_growth(client, baby_id, weight=, length=, head=, ...)` | `Growth` | any of the three, each a `Measurement`, rounded to two decimals; weight in decimal `"lb"` (9 lb 4 oz is 9.25) or `"kg"`, length and head in one of `"in"` or `"cm"`; each must be in `GROWTH_RANGES` |
+| `add_temperature(client, baby_id, temperature, ...)` | `Temperature` | `Measurement(value, "F")` or `Measurement(value, "C")`, not converted and rounded to two decimals; must be in `TEMPERATURE_RANGES` |
+| `add_other_feed(client, baby_id, food, amount=, unit=, meal_id=None, ...)` | `OtherFeed` | a solid food (or water, juice); `food` is a name or ID from `food_choices()`, `amount` counts `unit` (free text: "Oz", "Pieces", "Tsp") |
+| `add_food(client, name, bottle=False)` | `OtherFeedSelection` | a new food for the pick list, posted before the first solid food that names it; belongs to the account, so no `baby_id` |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
@@ -116,6 +133,21 @@ key.
   Time, Story Time) plus ones added in the app, `activity_choices()`, `find_activity`, and
   `UnknownActivityError`. The app has no bath screen: a bath is an activity of a type added in
   the app, such as "Bath". An activity's `duration` is whole minutes, 0 when not timed.
+- Foods work like activity types: the app's 9 built-ins (`BUILT_IN_FOODS`: Cereal, Veggies,
+  Fruit, Meat, Finger Foods, Vitamins, and the drinks Water, Juice, and Milk) plus ones added in
+  the app, `food_choices()`, `find_food`, and `UnknownFoodError`. A solid food's `unit` is free
+  text, so its `amount` is written as a `VolumeMeasure` with `englishMeasure` "true" whatever the
+  unit, as the iPhone app does; read it back with `quantity` and `unit`. Foods eaten together
+  share a meal (`meal_id`, the `objectID` of the record's `desc`): log the first, then pass its
+  `meal_id` for the rest. Without one, each food is its own meal.
+- `add_food` adds a food to the pick list the way both apps do: an `OtherFeedSelection` of its
+  own (`name`, `bottle`, `newFlage` "true", no record fields), posted before the first solid
+  food that names it. A name already on the list, ignoring case, raises `SelectionExistsError`
+  with the existing food's `object_id`. A solid food embeds its food as the iPhone app does:
+  typed, with `newFlage` "false" and the 1970 timestamp (its other keys, such as `bottle`, stay
+  as synced). A food that exists only in the account's seed, not yet used by a record, isn't a
+  choice in `food_choices()` and isn't caught as a duplicate by `add_food`. A synced food the
+  library can't decode still is both, unless it has no text `objectID` or `name`.
 - Where several records carry a copy of one entry, a synced copy wins, then the copy in the
   newest record (by its `timestamp`, then its `time`), so a dose's default amount is the usual
   dose of the newest dose. A medicine without a usual dose that is a number above zero needs an
@@ -290,6 +322,8 @@ read only the `BT_TEST_*` credentials, and keep their device ID and engine state
 `.pybabytracker-test-device.json` and `.pybabytracker-test-state.json` (both gitignored).
 
 ## Develop
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for what belongs in the library.
 
 ```sh
 uv venv --python 3.12 && uv pip install -e ".[dev]"
