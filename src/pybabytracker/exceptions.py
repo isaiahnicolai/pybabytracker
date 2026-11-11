@@ -89,10 +89,10 @@ class UnknownBabyError(WriteError):
 
 
 class UnknownSelectionError(WriteError):
-    """No entry of a pick list (a milestone, a vaccine, a medicine, an activity type) has that
-    name or ID.
+    """No entry of a pick list (a milestone, a vaccine, a medicine, an activity type, a food) has
+    that name or ID.
 
-    ``what`` says which list: "milestone", "vaccine", "medicine", or "activity".
+    ``what`` says which list: "milestone", "vaccine", "medicine", "activity", or "food".
     """
 
     def __init__(self, what: str, message: str) -> None:
@@ -119,6 +119,13 @@ class UnknownActivityError(UnknownSelectionError):
 
     def __init__(self, message: str) -> None:
         super().__init__("activity", message)
+
+
+class UnknownFoodError(UnknownSelectionError):
+    """No food with that name or ID is built in or known from sync."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__("food", message)
 
 
 class UnknownVaccineError(UnknownSelectionError):
@@ -183,6 +190,19 @@ class InvalidSelectionNameError(ValidationError, ValueError):
         super().__init__(f"{what} must be a name or an ID, not {value!r}")
         self.what = what
         self.value = value
+
+
+class SelectionExistsError(ValidationError):
+    """A new pick-list entry was refused because one of that name is already on the list.
+
+    ``what`` says which list ("food"); ``object_id`` is the existing entry's, to use instead.
+    """
+
+    def __init__(self, what: str, name: str, object_id: str) -> None:
+        super().__init__(f"there is already a {what} named {name!r} ({object_id})")
+        self.what = what
+        self.name = name
+        self.object_id = object_id
 
 
 class AmbiguousSelectionError(ValidationError):

@@ -1,7 +1,13 @@
 """Async client for the Nighp Baby Tracker sync service."""
 
 from ._version import __version__
-from .builders import GROWTH_RANGES, MAX_ACTIVITY_MINUTES, TEMPERATURE_RANGES
+from .builders import (
+    GROWTH_RANGES,
+    MAX_ACTIVITY_MINUTES,
+    MAX_FOOD_NAME_LENGTH,
+    MAX_OTHER_FEED_AMOUNT,
+    TEMPERATURE_RANGES,
+)
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
 from .exceptions import (
@@ -24,12 +30,14 @@ from .exceptions import (
     ObjectIdInUseError,
     ProtocolError,
     RecordNotFoundError,
+    SelectionExistsError,
     SleepStartOutOfRangeError,
     SleepTooLongError,
     TimerNotRunningError,
     TransactionDecodeError,
     UnknownActivityError,
     UnknownBabyError,
+    UnknownFoodError,
     UnknownMedicineError,
     UnknownMilestoneError,
     UnknownSelectionError,
@@ -80,6 +88,7 @@ from .models import (
     NursingSession,
     OtherActivity,
     OtherFeed,
+    OtherFeedSelection,
     Picture,
     Pump,
     Pumped,
@@ -100,6 +109,7 @@ from .models import (
 from .seed import Seed, read_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
+    BUILT_IN_FOODS,
     BUILT_IN_MILESTONES,
     BUILT_IN_VACCINES,
     SelectionChoice,
@@ -111,6 +121,8 @@ from .totals import DayTotals, LastBreast, day_totals, last_breast
 __all__ = [
     "GROWTH_RANGES",
     "MAX_ACTIVITY_MINUTES",
+    "MAX_FOOD_NAME_LENGTH",
+    "MAX_OTHER_FEED_AMOUNT",
     "MEDIA_PHOTO",
     "MEDIA_VIDEO",
     "Picture",
@@ -123,6 +135,7 @@ __all__ = [
     "ApplyResult",
     "AuthenticationError",
     "BUILT_IN_ACTIVITIES",
+    "BUILT_IN_FOODS",
     "BUILT_IN_MILESTONES",
     "BUILT_IN_VACCINES",
     "Baby",
@@ -166,6 +179,7 @@ __all__ = [
     "ObjectIdInUseError",
     "OtherActivity",
     "OtherFeed",
+    "OtherFeedSelection",
     "ProtocolError",
     "Pump",
     "PumpTimer",
@@ -174,6 +188,7 @@ __all__ = [
     "RawTransaction",
     "Record",
     "RecordNotFoundError",
+    "SelectionExistsError",
     "SIDE_LEFT",
     "SIDE_NONE",
     "SIDE_RIGHT",
@@ -199,6 +214,7 @@ __all__ = [
     "UNIT_OUNCES",
     "UNIT_POUNDS",
     "UnknownBabyError",
+    "UnknownFoodError",
     "UnknownActivityError",
     "UnknownMedicineError",
     "UnknownMilestoneError",

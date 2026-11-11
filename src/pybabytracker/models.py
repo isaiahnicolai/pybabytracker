@@ -539,6 +539,15 @@ class OtherFeed(Record):
         return _selection_name(self.feed_type)
 
     @property
+    def meal_id(self) -> str | None:
+        """The meal this food was part of: the ``objectID`` of its ``desc``, which the foods
+        logged together share, or else its ``descID``."""
+        meal = self.desc.get("objectID") if isinstance(self.desc, Mapping) else None
+        if isinstance(meal, str) and meal:
+            return meal
+        return self.desc_id
+
+    @property
     def quantity(self) -> float | None:
         """How many of ``unit`` were eaten, from the measure or a plain number."""
         if isinstance(self.amount, VolumeMeasure):
@@ -764,6 +773,21 @@ class MedicationSelection(Record):
     amount_per_time: float | None = _opt("amountPerTime")
     interval: int | None = _opt("interval")
     prescription: bool | str | None = _opt("prescription")
+
+
+@_register
+@dataclass(kw_only=True)
+class OtherFeedSelection(Record):
+    """A food a user added to the app's pick list. Both apps sync a new food as a transaction
+    of its own, just before the first solid food that names it (seen from iOS and Android).
+    ``bottle`` is "true" for a drink offered on the bottle screen; Android sends a JSON bool.
+    The built-in foods never sync: see ``BUILT_IN_FOODS``."""
+
+    object_type: ClassVar[str] = "OtherFeedSelection"
+
+    name: str | None = _opt("name")
+    desc: str | None = _opt("desc")
+    bottle: str | bool | None = _opt("bottle")
 
 
 @_register
