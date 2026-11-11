@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
@@ -17,6 +18,7 @@ import aiohttp
 from ._version import __version__
 from .exceptions import (
     AccountChangedError,
+    AccountResetError,
     AuthenticationError,
     BabyTrackerConnectionError,
     DownloadRefusedError,
@@ -127,7 +129,8 @@ class BabyTrackerClient:
             self._session = None
 
     async def sign_in(self) -> int:
-        """Start a session. Raises ``AuthenticationError`` if the credentials are rejected.
+        """Start a session. Raises ``AuthenticationError`` if the credentials are rejected, and
+        ``AccountResetError`` if the service refuses this device because the account was reset.
 
         Raises ``AccountChangedError`` if this client already signed in to a different sync
         group, which includes a sign-in made to recover from a 401 inside another call. The
@@ -152,6 +155,9 @@ class BabyTrackerClient:
                 "AppInfo": {"AppType": 0, "AccountType": 0},
             },
         )
+        if status == 401 and _is_reset_reply(text):
+            # Every device from before a reset is refused; the app joins as a new device.
+            raise AccountResetError(self._account_id)
         if status in (401, 403):
             raise AuthenticationError("the service rejected the email or password")
         _raise_for_status(status)
@@ -377,6 +383,19 @@ def _parse_entry(entry: Any) -> RawTransaction | None:
     except (KeyError, TypeError, ValueError):
         _LOGGER.warning("Log entry %s is malformed; it will be skipped", sync_id)
         return RawTransaction(sync_id, -1, "")
+
+
+_RESET_REPLY = re.compile(r"\baccount\s+has\s+been\s+reset\b", re.IGNORECASE)
+
+
+def _is_reset_reply(text: str) -> bool:
+    """Whether a refused sign-in says the account was reset, not that the password is wrong.
+
+    The service answers a device from before a reset with "Account has been reset. Please login
+    again". Only that phrase counts, in any case and spacing: "Your password has been reset", say,
+    is still a rejected password.
+    """
+    return _RESET_REPLY.search(text) is not None
 
 
 def _raise_for_status(status: int) -> None:

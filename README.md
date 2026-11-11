@@ -42,6 +42,10 @@ async with aiohttp.ClientSession() as session:
   new `BabyTrackerClient` and a new engine (the aiohttp session can be reused). State saved before
   this version adopts the first `AccountID` it sees, so a reset that happened before upgrading
   isn't detected.
+- `AccountResetError` (an `AccountChangedError`) means the service refused this device at sign-in
+  because the account was reset: after a reset it refuses every device that joined before it,
+  whatever the password, so it isn't an `AuthenticationError`. Join again as the app does, with a
+  new device UUID, a new client and a new engine.
 - Records are typed (`Diaper`, `Sleep`, `Nursing`, and so on). A record type the library
   doesn't know stays raw as an `UnknownRecord` (a debug line is logged once per type).
   `Medication` is a medicine dose with the medicine embedded, and `NursingSession`, the Android
