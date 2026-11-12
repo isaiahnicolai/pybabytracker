@@ -107,6 +107,10 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   babies. A pick-list entry another device added raises `EntryInUseError` while a record still
   names it (`entry_users(object_id)` counts them), and so does any baby that still has records
   (`baby_users(baby_id)`), since the apps refuse those deletes and post the entry or baby back.
+- `entry_of(record)` is the pick-list entry a record names (a dose's medicine, a solid food's
+  food, and so on), looked up by ID in the list's choices. Use it for the entry's current name:
+  it follows a `rename_entry`, and it finds the entry for a seed row that carries only the ID
+  because the seed doesn't hold the entry (such a record has no `food_name` of its own).
 - `rename_entry(client, object_id, name)` renames a food, medicine, milestone, vaccine, or
   activity type that has a record of its own, with an update of that record (expected, not yet
   seen in synced data). A name another entry of the list has raises `SelectionExistsError`.
