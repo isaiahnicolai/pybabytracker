@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -298,13 +298,17 @@ async def test_a_sleeps_new_start_keeps_its_end(
 async def test_a_running_sleep_stays_running_when_its_start_moves_and_an_end_finishes_it(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
-    seed(fake_server, sleep(0))
+    # A running sleep's start is checked against the clock, as a new one's is.
+    start = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=2)
+    running = sleep(0)
+    running["time"] = start.strftime("%Y-%m-%d %H:%M:%S +0000")
+    seed(fake_server, running)
     engine = await synced(client)
 
-    moved = await engine.edit_sleep(client, SLEEP, start=at(19, 50))
-    assert (moved.is_running, moved.time) == (True, at(19, 50))
+    moved = await engine.edit_sleep(client, SLEEP, start=start - timedelta(minutes=10))
+    assert (moved.is_running, moved.time) == (True, start - timedelta(minutes=10))
 
-    ended = await engine.edit_sleep(client, SLEEP, end=at(20, 20))
+    ended = await engine.edit_sleep(client, SLEEP, end=start + timedelta(minutes=20))
     assert (ended.is_running, ended.duration) == (False, 30)
 
 

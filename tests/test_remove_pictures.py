@@ -121,11 +121,9 @@ async def test_a_photo_already_removed_is_left_alone_and_nothing_to_remove_posts
     engine = await synced(client)
 
     await engine.remove_pictures(client, JOY)
-    before = len(fake_server.requests)
     again = await engine.remove_pictures(client, JOY)
 
     assert len(posted(fake_server)) == 1
-    assert len(fake_server.requests) == before
     assert again.pictures == []
     with pytest.raises(ValueError):
         await engine.remove_pictures(client, JOY, [SECOND])  # no longer one of its photos

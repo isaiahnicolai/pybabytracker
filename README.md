@@ -143,6 +143,7 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   of its `Baby` record, as the iPhone app does. A `photo` (JPEG bytes) is uploaded first as a new
   uppercase UUID plus ".jpg" and again plus "_l.jpg" (the landscape copy, `landscape_photo` when
   given), and becomes the baby's `pictureName`. Records added afterwards embed the edited baby.
+  A name another baby has raises `SelectionExistsError`, as for `add_baby`.
   A baby known only from the copies its records embed raises `RecordNotFoundError`: those can
   be partial, and after a seed read the baby's own record is there.
 - Save `to_dict()` after every write, including one that raised: a pending post lives only in
