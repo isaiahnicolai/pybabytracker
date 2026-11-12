@@ -105,6 +105,12 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   when its start moves (so it gets longer or shorter). When a nursing's minutes change, the keys
   an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
   `NursingSession` keeps its minutes.
+- `edit_baby(client, baby_id, name=, birth=, due=, boy=, photo=)` changes a baby with an update
+  of its `Baby` record, as the iPhone app does. A `photo` (JPEG bytes) is uploaded first as a new
+  uppercase UUID plus ".jpg" and again plus "_l.jpg" (the landscape copy, `landscape_photo` when
+  given), and becomes the baby's `pictureName`. Records added afterwards embed the edited baby.
+  A baby known only from the copies its records embed raises `RecordNotFoundError`: those can
+  be partial, and after a seed read the baby's own record is there.
 - Save `to_dict()` after every write, including one that raised: a pending post lives only in
   that state. Use one device ID per running process; two processes writing as one device can
   collide on a number while `LastSyncID` lags.

@@ -90,6 +90,7 @@ from .builders import (
     Draft,
     Edit,
     NewPicture,
+    baby_changes,
     bottle_changes,
     check_pictures,
     common_changes,
@@ -173,6 +174,7 @@ from .models import (
     Vaccine,
     VaccineSelection,
     Volume,
+    check_jpeg,
     decode_payload,
     decode_transaction,
     encode_transaction,
@@ -657,6 +659,85 @@ class SyncEngine:
         record = await self._edit(target, object_id, changes, Sleep)
         assert isinstance(record, Sleep)
         return record
+
+    async def edit_baby(
+        self,
+        target: WriteTarget,
+        baby_id: str,
+        *,
+        name: str | None = None,
+        birth: datetime | None = None,
+        due: datetime | None = None,
+        boy: bool | None = None,
+        photo: bytes | None = None,
+        landscape_photo: bytes | None = None,
+    ) -> Baby:
+        """Change a baby: its ``name``, ``birth`` and ``due`` dates (aware), whether it is a
+        ``boy``, and its ``photo``. Give at least one. It posts an update (opcode 1) of the
+        ``Baby`` record, as the iPhone app does: the baby as last saved with only the edited
+        keys, ``newFlage`` false, and ``timestamp`` changed, as for ``edit_record``.
+
+        ``photo`` is the bytes of a JPEG. It is uploaded first, under a new uppercase UUID plus
+        ".jpg" and again plus "_l.jpg" (the landscape copy, ``landscape_photo`` when given, else
+        the same photo, as the iPhone app uploads it), and the baby's ``pictureName`` becomes
+        that UUID. The old photo's files stay on the service.
+
+        Returns the baby as updated; records added afterwards embed it. Without a photo,
+        nothing is posted when the baby already has the values. Refused before any request:
+        ``ValueError`` for nothing to change or a bad value, ``UnknownBabyError`` for a baby
+        never seen, and ``RecordNotFoundError`` for a baby that was deleted, or whose own
+        record hasn't synced (only the copies its records carry, which may be partial).
+        """
+        picture = check_jpeg(photo, "a baby's photo") if photo is not None else None
+        landscape = (
+            check_jpeg(landscape_photo, "a baby's landscape photo")
+            if landscape_photo is not None
+            else picture
+        )
+        if landscape_photo is not None and picture is None:
+            raise ValueError("give a photo with its landscape_photo")
+
+        def changes(baby: Baby) -> Edit:
+            given = baby_changes(baby, name=name, birth=birth, due=due, boy=boy)
+            if not given and picture is None:
+                raise ValueError("give something to change")
+            return Edit(given)
+
+        async with self._lock:
+            self._check_can_write(target)
+            baby_id = self._resolve_id(baby_id, self._records, self._tombstones) or baby_id
+            baby = self._saved_baby(baby_id)
+            if picture is None and changes(baby).already_in(baby.to_payload()):
+                return baby
+            # Every device's log: the update carries the whole baby as last saved.
+            await self._catch_up(target)
+            number = await self._prepare(target)
+            baby = self._saved_baby(baby_id)
+            edit = changes(baby)
+            if picture is None and edit.already_in(baby.to_payload()):
+                return baby
+            if picture is not None and landscape is not None:
+                picture_name = str(uuid.uuid4()).upper()
+                await target.upload_picture(f"{picture_name}.jpg", picture)
+                await target.upload_picture(f"{picture_name}_l.jpg", landscape)
+                edit = Edit({**edit.set, "pictureName": picture_name})
+            updated = decode_payload(edited_payload(baby, edit, _update_stamp(baby)))
+            assert isinstance(updated, Baby)
+            await self._send(target, number, OP_UPDATE, encode_transaction(updated))
+            return updated
+
+    def _saved_baby(self, baby_id: str) -> Baby:
+        """The baby's own record, or raise why it can't be edited."""
+        record = self._records.get(baby_id)
+        if isinstance(record, Baby):
+            return record
+        if baby_id in self._tombstones:
+            raise RecordNotFoundError(f"baby {baby_id} was deleted")
+        if record is not None or baby_id not in self.babies():
+            raise UnknownBabyError(f"no baby {baby_id} is known from sync")
+        raise RecordNotFoundError(
+            f"baby {baby_id}'s own record hasn't synced, only the copies its records carry"
+        )
 
     async def _edit(
         self,

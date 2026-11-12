@@ -406,6 +406,45 @@ def sleep_changes(sleep: Sleep, *, start: datetime | None, end: datetime | None)
     return changes
 
 
+# The longest name of a baby, in characters.
+MAX_BABY_NAME_LENGTH = 50
+
+
+def baby_changes(
+    baby: Baby,
+    *,
+    name: str | None,
+    birth: datetime | None,
+    due: datetime | None,
+    boy: bool | None,
+) -> dict[str, Any]:
+    """The payload keys an edit of a baby changes, checked. ``birth`` and ``due`` (aware) are
+    written in UTC to the second, as ``dob`` and ``dueDay``. ``gender`` is true for a boy, and
+    keeps the type the saved baby has: the iPhone app writes "true" or "false", and Android a
+    JSON bool."""
+    changes: dict[str, Any] = {}
+    if name is not None:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("a baby's name must be text")
+        if len(name.strip()) > MAX_BABY_NAME_LENGTH:
+            raise ValueError(
+                f"a baby's name can't be longer than {MAX_BABY_NAME_LENGTH} characters"
+            )
+        changes["name"] = name.strip()
+    if birth is not None:
+        changes["dob"] = _edited_time(birth, "birth")
+    if due is not None:
+        changes["dueDay"] = _edited_time(due, "due")
+    if boy is not None:
+        if not isinstance(boy, bool):
+            raise ValueError("boy must be True or False")
+        if isinstance(baby.gender, bool):
+            changes["gender"] = boy
+        else:
+            changes["gender"] = "true" if boy else "false"
+    return changes
+
+
 def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str, Any]:
     """The update that edits a saved record, as the iPhone app posts it: the record as last
     saved (key order and unknown keys kept), with only the edited keys, ``newFlage`` false, and
