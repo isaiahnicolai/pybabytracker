@@ -110,7 +110,7 @@ async def test_a_diapers_kind_time_and_note_change_in_one_update(
     assert payload["time"] == "2026-11-11 09:00:00 +0000"
 
 
-@pytest.mark.parametrize("status", [3, -1, True, "1", 1.0])
+@pytest.mark.parametrize("status", [4, -1, True, "1", 1.0])
 async def test_a_bad_diaper_kind_is_refused_with_no_request(
     client: BabyTrackerClient, fake_server: FakeSyncServer, status: Any
 ) -> None:

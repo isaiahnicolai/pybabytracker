@@ -32,10 +32,11 @@ from typing import Any, NamedTuple
 
 from .exceptions import NoUsualDoseError
 from .models import (
+    DIAPER_AMOUNT_NONE,
     DIAPER_AMOUNT_NORMAL,
     DIAPER_AMOUNTS,
-    DIAPER_DIRTY,
-    DIAPER_MIXED,
+    DIAPER_DRY,
+    DIAPER_STATUSES,
     DIAPER_WET,
     MEDIA_PHOTO,
     SIDE_LEFT,
@@ -359,16 +360,16 @@ def _edited_time(moment: object, name: str) -> str:
 
 
 def diaper_changes(status: int | None, amount: int | None = None) -> dict[str, Any]:
-    """A diaper's kind and amount, checked as for ``draft_diaper``."""
+    """A diaper's kind and amount, checked as for ``draft_diaper``. With no ``amount``, changing
+    the kind to dry sets the amount to none and changing it to wet sets it to normal, as the
+    Android app's diaper screen does; dirty and mixed leave it."""
     changes: dict[str, Any] = {}
     if status is not None:
-        if (
-            isinstance(status, bool)
-            or not isinstance(status, int)
-            or status not in (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED)
-        ):
-            raise ValueError(f"unknown diaper status: {status!r}")
-        changes["status"] = status
+        changes["status"] = _checked_diaper_status(status)
+        if amount is None and status == DIAPER_DRY:
+            changes["amount"] = DIAPER_AMOUNT_NONE
+        elif amount is None and status == DIAPER_WET:
+            changes["amount"] = DIAPER_AMOUNT_NORMAL
     if amount is not None:
         changes["amount"] = _checked_diaper_amount(amount)
     return changes
@@ -721,6 +722,13 @@ def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str,
     return payload
 
 
+def _checked_diaper_status(status: object) -> int:
+    """A diaper's kind: one of ``DIAPER_STATUSES``."""
+    if isinstance(status, bool) or not isinstance(status, int) or status not in DIAPER_STATUSES:
+        raise ValueError(f"unknown diaper status: {status!r}")
+    return status
+
+
 def _checked_diaper_amount(amount: object) -> int:
     """A diaper's amount: one of ``DIAPER_AMOUNTS``."""
     if isinstance(amount, bool) or not isinstance(amount, int) or amount not in DIAPER_AMOUNTS:
@@ -734,10 +742,13 @@ def draft_diaper(
     time: datetime | None,
     timezone_offset: int | None,
     note: str,
-    amount: int = DIAPER_AMOUNT_NORMAL,
+    amount: int | None = None,
 ) -> Draft[Diaper]:
-    if status not in (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED):
-        raise ValueError(f"unknown diaper status: {status!r}")
+    """A diaper. With no ``amount``, a dry one gets none and any other a normal amount, as the
+    Android app's diaper screen saves them."""
+    _checked_diaper_status(status)
+    if amount is None:
+        amount = DIAPER_AMOUNT_NONE if status == DIAPER_DRY else DIAPER_AMOUNT_NORMAL
     written_amount = _checked_diaper_amount(amount)
     event, tz, text = _common(time, timezone_offset, note)
 

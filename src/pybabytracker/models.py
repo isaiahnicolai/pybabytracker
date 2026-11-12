@@ -28,9 +28,10 @@ OP_DELETE = 2
 DIAPER_WET = 0
 DIAPER_DIRTY = 1
 DIAPER_MIXED = 2
-# A dry diaper, in the Android app's list of kinds. Read only: not yet seen in synced data, so
-# nothing writes it.
+# A dry diaper: the fourth choice on the Android app's diaper screen, which saves it with an
+# amount of none. Not yet seen in synced data.
 DIAPER_DRY = 3
+DIAPER_STATUSES = (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED, DIAPER_DRY)
 # A diaper's ``amount``. Normal and not set are the two seen in synced data (the apps write
 # normal on a plain add); the other values are the Android app's own list.
 DIAPER_AMOUNT_NONE = 0

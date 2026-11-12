@@ -158,7 +158,6 @@ from .exceptions import (
     WrongRecordTypeError,
 )
 from .models import (
-    DIAPER_AMOUNT_NORMAL,
     OP_ADD,
     OP_DELETE,
     OP_UPDATE,
@@ -448,7 +447,7 @@ class SyncEngine:
         baby_id: str,
         status: int,
         *,
-        amount: int = DIAPER_AMOUNT_NORMAL,
+        amount: int | None = None,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str = "",
@@ -456,9 +455,10 @@ class SyncEngine:
     ) -> Diaper:
         """Post a new diaper for a baby known from sync, and apply it locally.
 
-        ``status`` is ``DIAPER_WET``, ``DIAPER_DIRTY``, or ``DIAPER_MIXED``. ``amount`` is one
-        of ``DIAPER_AMOUNTS`` and defaults to ``DIAPER_AMOUNT_NORMAL``, which is what the apps
-        write when only a kind is picked. ``time`` (aware)
+        ``status`` is ``DIAPER_WET``, ``DIAPER_DIRTY``, ``DIAPER_MIXED``, or ``DIAPER_DRY``.
+        ``amount`` is one of ``DIAPER_AMOUNTS``; left out, it is ``DIAPER_AMOUNT_NORMAL``,
+        which is what the apps write when only a kind is picked, or ``DIAPER_AMOUNT_NONE`` for
+        a dry diaper, as the Android app saves one. ``time`` (aware)
         defaults to now. ``timezone_offset`` (seconds east of UTC) defaults to ``time``'s offset.
         The app itself writes the zone's *standard* offset all year, ignoring daylight saving
         (-18000 for Eastern in July and January), so for a record that matches it pass
@@ -577,10 +577,11 @@ class SyncEngine:
         timezone_offset: int | None = None,
         note: str | None = None,
     ) -> Diaper:
-        """Change a saved diaper: its ``status`` (``DIAPER_WET``, ``DIAPER_DIRTY``, or
-        ``DIAPER_MIXED``), its ``amount`` (one of ``DIAPER_AMOUNTS``), and its time, zone, and
-        note as for ``edit_record``, whose rules it shares. Give at least one. A record that
-        isn't a diaper raises ``WrongRecordTypeError``.
+        """Change a saved diaper: its ``status`` (one of ``DIAPER_STATUSES``), its ``amount``
+        (one of ``DIAPER_AMOUNTS``), and its time, zone, and note as for ``edit_record``, whose
+        rules it shares. Give at least one. With no ``amount``, a change to dry sets the amount
+        to none and a change to wet sets it to normal, as the Android app's screen does. A
+        record that isn't a diaper raises ``WrongRecordTypeError``.
         """
         common = common_changes(
             time=time, timezone_offset=timezone_offset, note=note, required=False

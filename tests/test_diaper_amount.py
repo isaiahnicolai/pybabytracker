@@ -11,11 +11,13 @@ from selection_helpers import posted, rid, seed, synced
 
 from pybabytracker import (
     DIAPER_AMOUNT_HEAVY,
+    DIAPER_AMOUNT_NONE,
     DIAPER_AMOUNT_NORMAL,
     DIAPER_AMOUNT_NOT_SET,
     DIAPER_AMOUNTS,
     DIAPER_DRY,
     DIAPER_MIXED,
+    DIAPER_STATUSES,
     DIAPER_WET,
     BabyTrackerClient,
     Diaper,
@@ -91,7 +93,7 @@ async def test_a_saved_diapers_amount_changes_and_nothing_else(
     assert updated.amount == DIAPER_AMOUNT_HEAVY
 
 
-@pytest.mark.parametrize("amount", [6, -1, True, "3", 2.0, None])
+@pytest.mark.parametrize("amount", [6, -1, True, "3", 2.0])
 async def test_a_bad_amount_is_refused_with_no_request(
     client: BabyTrackerClient, fake_server: FakeSyncServer, amount: Any
 ) -> None:
@@ -101,24 +103,62 @@ async def test_a_bad_amount_is_refused_with_no_request(
 
     with pytest.raises(ValueError):
         await engine.add_diaper(client, BABY_ID, DIAPER_WET, amount=amount)
-    if amount is not None:  # None means "leave it" for an edit
-        with pytest.raises(ValueError):
-            await engine.edit_diaper(client, DIAPER, amount=amount)
+    with pytest.raises(ValueError):
+        await engine.edit_diaper(client, DIAPER, amount=amount)
     assert len(fake_server.requests) == before
 
 
-async def test_a_dry_diaper_is_read_but_not_written(
+async def test_a_dry_diaper_is_logged_with_an_amount_of_none_as_the_android_app_saves_one(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
-    dry = decode_payload(iphone_diaper(status=DIAPER_DRY))
-    assert isinstance(dry, Diaper)
-    assert dry.status == DIAPER_DRY
-
-    seed(fake_server, iphone_diaper())
+    seed(fake_server)
     engine = await synced(client)
-    before = len(fake_server.requests)
-    with pytest.raises(ValueError):
-        await engine.add_diaper(client, BABY_ID, DIAPER_DRY)
-    with pytest.raises(ValueError):
-        await engine.edit_diaper(client, DIAPER, status=DIAPER_DRY)
-    assert len(fake_server.requests) == before
+
+    record = await engine.add_diaper(client, BABY_ID, DIAPER_DRY)
+
+    assert (record.status, record.amount) == (DIAPER_DRY, DIAPER_AMOUNT_NONE)
+    [payload] = posted(fake_server)
+    assert (payload["status"], payload["amount"]) == (3, 0)
+    assert (payload["peeColor"], payload["pooColor"], payload["texture"], payload["flag"]) == (
+        5,
+        5,
+        5,
+        0,
+    )
+
+
+async def test_a_dry_diaper_with_an_amount_given_keeps_it(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server)
+    engine = await synced(client)
+
+    record = await engine.add_diaper(client, BABY_ID, DIAPER_DRY, amount=DIAPER_AMOUNT_NOT_SET)
+
+    assert record.amount == DIAPER_AMOUNT_NOT_SET
+
+
+async def test_changing_a_diapers_kind_moves_its_amount_as_the_android_screen_does(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    original = iphone_diaper(status=2, amount=3)
+    seed(fake_server, original)
+    engine = await synced(client)
+
+    dry = await engine.edit_diaper(client, DIAPER, status=DIAPER_DRY)
+    assert (dry.status, dry.amount) == (DIAPER_DRY, DIAPER_AMOUNT_NONE)
+    wet = await engine.edit_diaper(client, DIAPER, status=DIAPER_WET)
+    assert (wet.status, wet.amount) == (DIAPER_WET, DIAPER_AMOUNT_NORMAL)
+    heavy = await engine.edit_diaper(client, DIAPER, amount=DIAPER_AMOUNT_HEAVY)
+    mixed = await engine.edit_diaper(client, DIAPER, status=DIAPER_MIXED)
+    assert heavy.amount == DIAPER_AMOUNT_HEAVY
+    assert (mixed.status, mixed.amount) == (DIAPER_MIXED, DIAPER_AMOUNT_HEAVY)  # left alone
+    kept = await engine.edit_diaper(client, DIAPER, status=DIAPER_DRY, amount=DIAPER_AMOUNT_HEAVY)
+    assert (kept.status, kept.amount) == (DIAPER_DRY, DIAPER_AMOUNT_HEAVY)
+
+
+def test_a_dry_diaper_from_another_device_is_read() -> None:
+    dry = decode_payload(iphone_diaper(status=DIAPER_DRY, amount=0))
+    assert isinstance(dry, Diaper)
+    assert (dry.status, dry.amount) == (DIAPER_DRY, DIAPER_AMOUNT_NONE)
+    assert DIAPER_STATUSES == (0, 1, 2, 3)

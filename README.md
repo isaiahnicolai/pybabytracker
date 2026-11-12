@@ -136,7 +136,7 @@ key.
 
 | Method | Writes | Notes |
 |---|---|---|
-| `add_diaper(client, baby_id, status, amount=DIAPER_AMOUNT_NORMAL, ...)` | `Diaper` | `DIAPER_WET`, `DIAPER_DIRTY`, `DIAPER_MIXED`; `amount` is one of `DIAPER_AMOUNTS` (none, light, normal, heavy, overflow, not set) |
+| `add_diaper(client, baby_id, status, amount=None, ...)` | `Diaper` | `DIAPER_WET`, `DIAPER_DIRTY`, `DIAPER_MIXED`, `DIAPER_DRY`; `amount` is one of `DIAPER_AMOUNTS` (none, light, normal, heavy, overflow, not set), by default normal, or none for a dry diaper |
 | `add_formula(client, baby_id, volume=, ...)` | `Formula` | volume more than zero |
 | `add_pumped(client, baby_id, volume=, ...)` | `Pumped` | a bottle of pumped milk |
 | `add_nursing(client, baby_id, left_minutes=, right_minutes=, ...)` | `Nursing` | a finished session |
