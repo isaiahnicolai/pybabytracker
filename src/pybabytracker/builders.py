@@ -445,6 +445,109 @@ def baby_changes(
     return changes
 
 
+def _checked_dose(amount: object) -> int | float:
+    """A dose as written: a finite number above zero, also once rounded."""
+    if isinstance(amount, bool) or not isinstance(amount, int | float) or not _finite(amount):
+        raise ValueError("a dose's amount must be a finite number")
+    if amount <= 0 or _number(amount) <= 0:
+        raise ValueError("a dose's amount must be more than zero")
+    return _number(amount)
+
+
+def _checked_food_amount(amount: object) -> int | float:
+    """A solid food's amount as written: above zero and at most ``MAX_OTHER_FEED_AMOUNT``."""
+    if isinstance(amount, bool) or not isinstance(amount, int | float):
+        raise ValueError("amount must be a number")
+    if not _finite(amount) or _number(amount) <= 0:
+        raise ValueError("amount must be more than zero")
+    if amount > MAX_OTHER_FEED_AMOUNT:
+        raise ValueError(f"amount can't be more than {MAX_OTHER_FEED_AMOUNT}")
+    return _number(amount)
+
+
+def _checked_food_unit(unit: object) -> str:
+    """A solid food's unit as written: text, without surrounding spaces."""
+    if not isinstance(unit, str) or not unit.strip():
+        raise ValueError("unit must be text, such as 'Oz' or 'Pieces'")
+    if len(unit.strip()) > MAX_UNIT_LENGTH:
+        raise ValueError(f"unit can't be longer than {MAX_UNIT_LENGTH} characters")
+    return unit.strip()
+
+
+def _checked_activity_minutes(duration: object) -> int:
+    """An activity's length: whole minutes from 0 to ``MAX_ACTIVITY_MINUTES``."""
+    if isinstance(duration, bool) or not isinstance(duration, int):
+        raise ValueError("duration must be a whole number of minutes")
+    if duration < 0:
+        raise ValueError("duration can't be negative")
+    if duration > MAX_ACTIVITY_MINUTES:
+        raise ValueError(f"duration can't be more than {MAX_ACTIVITY_MINUTES} minutes")
+    return duration
+
+
+def temperature_changes(temperature: Measurement | None) -> dict[str, Any]:
+    """A temperature's reading, checked and written as for ``draft_temperature``."""
+    if temperature is None:
+        return {}
+    measure = _checked_measure(
+        "temperature", temperature, TEMPERATURE_RANGES, "TemperatureMeasure", {UNIT_FAHRENHEIT}
+    )
+    return {"temperature": dict(measure)}
+
+
+def growth_changes(
+    growth: Growth,
+    *,
+    weight: Measurement | None,
+    length: Measurement | None,
+    head: Measurement | None,
+) -> dict[str, Any]:
+    """A growth record's measurements, checked and written as for ``draft_growth``. One not
+    given is kept. Length and head share one unit in the apps, so a new one must be in the unit
+    of the other, given or saved."""
+    given = {"weight": weight, "length": length, "head": head}
+    changes = {
+        name: dict(
+            _checked_measure(
+                name, reading, GROWTH_RANGES[name], _GROWTH_MEASURES[name], _GROWTH_US_UNITS
+            )
+        )
+        for name, reading in given.items()
+        if reading is not None
+    }
+    saved_length, saved_head = growth.length_reading, growth.head_reading
+    length_unit = length.unit if length is not None else saved_length and saved_length.unit
+    head_unit = head.unit if head is not None else saved_head and saved_head.unit
+    if (
+        (length is not None or head is not None)
+        and length_unit
+        and head_unit
+        and length_unit != head_unit
+    ):
+        raise ValueError("length and head must be in the same unit")
+    return changes
+
+
+def medication_changes(amount: float | None) -> dict[str, Any]:
+    """A dose's amount, checked and written as for ``draft_medication``."""
+    return {} if amount is None else {"amount": _checked_dose(amount)}
+
+
+def other_feed_changes(amount: float | None, unit: str | None) -> dict[str, Any]:
+    """A solid food's amount and unit, checked and written as for ``draft_other_feed``."""
+    changes: dict[str, Any] = {}
+    if amount is not None:
+        changes["amount"] = VolumeMeasure(_checked_food_amount(amount), "true").to_payload()
+    if unit is not None:
+        changes["unit"] = _checked_food_unit(unit)
+    return changes
+
+
+def activity_changes(duration: int | None) -> dict[str, Any]:
+    """An activity's length, checked as for ``draft_activity``."""
+    return {} if duration is None else {"duration": _checked_activity_minutes(duration)}
+
+
 def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str, Any]:
     """The update that edits a saved record, as the iPhone app posts it: the record as last
     saved (key order and unknown keys kept), with only the edited keys, ``newFlage`` false, and
@@ -521,12 +624,7 @@ def draft_activity(
     keys the iPhone app sends, and not ``descID`` or ``locationID``, which the model reads but
     the app keeps in its local database.
     """
-    if isinstance(duration, bool) or not isinstance(duration, int):
-        raise ValueError("duration must be a whole number of minutes")
-    if duration < 0:
-        raise ValueError("duration can't be negative")
-    if duration > MAX_ACTIVITY_MINUTES:
-        raise ValueError(f"duration can't be more than {MAX_ACTIVITY_MINUTES} minutes")
+    _checked_activity_minutes(duration)
     embedded = dict(selection)
     event, tz, text = _common(time, timezone_offset, note)
 
@@ -696,21 +794,11 @@ def draft_other_feed(
     ``objectID`` is shared by the foods logged together, as the app does, so give each food of
     one meal the same ``meal_id``.
     """
-    if isinstance(amount, bool) or not isinstance(amount, int | float):
-        raise ValueError("amount must be a number")
-    if not _finite(amount) or _number(amount) <= 0:
-        raise ValueError("amount must be more than zero")
-    if amount > MAX_OTHER_FEED_AMOUNT:
-        raise ValueError(f"amount can't be more than {MAX_OTHER_FEED_AMOUNT}")
-    if not isinstance(unit, str) or not unit.strip():
-        raise ValueError("unit must be text, such as 'Oz' or 'Pieces'")
-    if len(unit.strip()) > MAX_UNIT_LENGTH:
-        raise ValueError(f"unit can't be longer than {MAX_UNIT_LENGTH} characters")
+    value = _checked_food_amount(amount)
+    written_unit = _checked_food_unit(unit)
     if not isinstance(meal_id, str) or not meal_id.strip():
         raise ValueError("meal_id must be text")
     embedded = _embedded("OtherFeedSelection", selection)
-    written_unit = unit.strip()
-    value = _number(amount)
     desc = {
         "BCObjectType": "FeedDescription",
         "newFlage": "true",
@@ -870,13 +958,7 @@ def draft_medication(
         amount = _usual_dose(embedded)
         if amount is None:
             raise NoUsualDoseError(_selection_name(embedded))
-    if isinstance(amount, bool) or not isinstance(amount, int | float) or not _finite(amount):
-        raise ValueError("a dose's amount must be a finite number")
-    if amount <= 0:
-        raise ValueError("a dose's amount must be more than zero")
-    dose = _number(amount)
-    if dose <= 0:
-        raise ValueError("a dose's amount must be more than zero")  # also after rounding
+    dose = _checked_dose(amount)
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Medication:

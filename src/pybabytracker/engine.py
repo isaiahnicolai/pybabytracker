@@ -90,6 +90,7 @@ from .builders import (
     Draft,
     Edit,
     NewPicture,
+    activity_changes,
     baby_changes,
     bottle_changes,
     check_pictures,
@@ -113,11 +114,15 @@ from .builders import (
     draft_vaccine,
     edited_payload,
     ended_sleep_payload,
+    growth_changes,
+    medication_changes,
     nursing_edit,
+    other_feed_changes,
     picture_entry,
     pictured_payload,
     resolve_sleep_end,
     sleep_changes,
+    temperature_changes,
 )
 from .client import Device, RawTransaction
 from .exceptions import (
@@ -531,8 +536,8 @@ class SyncEngine:
         It edits a baby's record or a pump. Refused before any request: ``ValueError`` for
         nothing to change or a bad value, ``RecordNotFoundError`` for a record never seen or
         deleted, and ``WrongRecordTypeError`` for a baby, a pick-list entry, or a record of a
-        type the library doesn't know. ``object_id`` can be in either case. ``edit_diaper``,
-        ``edit_bottle``, ``edit_nursing``, and ``edit_sleep`` also change a record's own fields.
+        type the library doesn't know. ``object_id`` can be in either case. The ``edit_*`` methods
+        for each record type also change a record's own fields.
         """
         edit = Edit(common_changes(time=time, timezone_offset=timezone_offset, note=note))
         return await self._edit(target, object_id, lambda record: edit)
@@ -658,6 +663,128 @@ class SyncEngine:
 
         record = await self._edit(target, object_id, changes, Sleep)
         assert isinstance(record, Sleep)
+        return record
+
+    async def edit_temperature(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        temperature: Measurement | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Temperature:
+        """Change a saved temperature: its reading (``Measurement(value, "F")`` or
+        ``Measurement(value, "C")``, checked as for ``add_temperature``), and its time, zone,
+        and note as for ``edit_record``, whose rules it shares. Give at least one.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**temperature_changes(temperature), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, Temperature)
+        assert isinstance(record, Temperature)
+        return record
+
+    async def edit_growth(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        weight: Measurement | None = None,
+        length: Measurement | None = None,
+        head: Measurement | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Growth:
+        """Change a saved growth record: any of its ``weight``, ``length``, and ``head``
+        (each checked as for ``add_growth``), and its time, zone, and note as for
+        ``edit_record``, whose rules it shares. Give at least one. A measurement not given is
+        kept, and one can't be removed. A new length or head must be in the unit of the other,
+        given or saved.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+
+        def changes(record: Record) -> Edit:
+            assert isinstance(record, Growth)
+            own = growth_changes(record, weight=weight, length=length, head=head)
+            return Edit(_some({**own, **common}))
+
+        record = await self._edit(target, object_id, changes, Growth)
+        assert isinstance(record, Growth)
+        return record
+
+    async def edit_medication(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        amount: float | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Medication:
+        """Change a saved dose: its ``amount`` (more than zero, as for ``add_medication``),
+        and its time, zone, and note as for ``edit_record``, whose rules it shares. Give at
+        least one. The medicine itself can't be changed: delete the dose and add another.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**medication_changes(amount), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, Medication)
+        assert isinstance(record, Medication)
+        return record
+
+    async def edit_other_feed(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        amount: float | None = None,
+        unit: str | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> OtherFeed:
+        """Change a saved solid food: its ``amount`` and ``unit`` (checked as for
+        ``add_other_feed``), and its time, zone, and note as for ``edit_record``, whose rules
+        it shares. Give at least one. The food and the meal can't be changed: delete the
+        record and add another.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**other_feed_changes(amount, unit), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, OtherFeed)
+        assert isinstance(record, OtherFeed)
+        return record
+
+    async def edit_activity(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        duration: int | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> OtherActivity:
+        """Change a saved activity: its ``duration`` (whole minutes, as for
+        ``add_activity``), and its time, zone, and note as for ``edit_record``, whose rules it
+        shares. Give at least one. The activity type can't be changed: delete the record and
+        add another.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**activity_changes(duration), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, OtherActivity)
+        assert isinstance(record, OtherActivity)
         return record
 
     async def edit_baby(

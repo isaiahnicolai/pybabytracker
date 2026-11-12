@@ -99,12 +99,15 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   already has the values, so a retry is safe. A sleep's or nursing's length is kept when its
   start moves.
 - `edit_diaper` (`status`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
-  `right_minutes`, `finish_side`), and `edit_sleep` (`start`, `end`) change a record's own
+  `right_minutes`, `finish_side`), `edit_sleep` (`start`, `end`), `edit_temperature`
+  (`temperature`), `edit_growth` (`weight`, `length`, `head`), `edit_medication` (`amount`),
+  `edit_other_feed` (`amount`, `unit`), and `edit_activity` (`duration`) change a record's own
   fields the same way, with the time, zone, and note in the same update, and with the checks of
   the matching `add_*`. A value not given is kept: a nursing's other side, and a sleep's end
   when its start moves (so it gets longer or shorter). When a nursing's minutes change, the keys
   an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
-  `NursingSession` keeps its minutes.
+  `NursingSession` keeps its minutes. The medicine, food, or activity type a record embeds
+  can't be changed by an edit: delete the record and add another.
 - `edit_baby(client, baby_id, name=, birth=, due=, boy=, photo=)` changes a baby with an update
   of its `Baby` record, as the iPhone app does. A `photo` (JPEG bytes) is uploaded first as a new
   uppercase UUID plus ".jpg" and again plus "_l.jpg" (the landscape copy, `landscape_photo` when
