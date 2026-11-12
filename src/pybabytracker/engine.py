@@ -1287,6 +1287,9 @@ class SyncEngine:
                 if not any_device:
                     raise NotOwnRecordError(f"record {object_id} wasn't created by this device")
                 self._deletable(object_id)
+                # Every device's log, not just this one's: the delete carries the whole record,
+                # so it must hold whatever another device saved since the last sync.
+                await self._catch_up(target)
             elif object_id not in self._records:
                 raise RecordNotFoundError(f"record {object_id} is already deleted")
             number = await self._prepare(target)
@@ -1308,11 +1311,7 @@ class SyncEngine:
             raise WrongRecordTypeError(
                 f"record {object_id} is a Baby, which only the device that created it can delete"
             )
-        record = self._records.get(object_id)
-        if record is None:
-            if object_id in self._tombstones:
-                raise RecordNotFoundError(f"record {object_id} is already deleted")
-            raise RecordNotFoundError(f"no record {object_id} is known from sync")
+        record = self._saved_record(object_id)
         if isinstance(record, _NOT_DELETABLE_FROM_OTHERS):
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, which only the "

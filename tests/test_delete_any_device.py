@@ -200,3 +200,30 @@ async def test_a_delete_after_the_group_is_reset_posts_nothing(
     with pytest.raises(AccountChangedError):
         await engine.delete_record(client, IPHONE_ACTIVITY, any_device=True)
     assert posted(fake_server) == []
+
+
+async def test_the_delete_carries_what_another_device_saved_since_the_last_sync(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server, iphone_activity())
+    engine = await synced(client)
+    newer = iphone_activity() | {"note": "Edited on the phone", "newFlage": "false"}
+    newer["timestamp"] = "2026-10-26 16:00:00 +0000"
+    fake_server.add_transaction(PHONE, 1, newer)  # an edit this engine hasn't synced
+
+    await engine.delete_record(client, IPHONE_ACTIVITY, any_device=True)
+
+    [payload] = posted(fake_server)
+    assert payload == newer
+
+
+async def test_a_record_deleted_on_another_device_since_the_last_sync_is_not_deleted_again(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server, iphone_activity())
+    engine = await synced(client)
+    fake_server.add_transaction(PHONE, OP_DELETE, iphone_activity() | {"newFlage": "false"})
+
+    with pytest.raises(RecordNotFoundError):
+        await engine.delete_record(client, IPHONE_ACTIVITY, any_device=True)
+    assert posted(fake_server) == []
