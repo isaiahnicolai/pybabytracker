@@ -90,6 +90,7 @@ from .builders import (
     Draft,
     NewPicture,
     check_pictures,
+    common_changes,
     draft_activity,
     draft_bottle,
     draft_diaper,
@@ -106,6 +107,7 @@ from .builders import (
     draft_sleep_start,
     draft_temperature,
     draft_vaccine,
+    edited_payload,
     ended_sleep_payload,
     picture_entry,
     pictured_payload,
@@ -184,8 +186,9 @@ from .selections import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# What ``delete_record`` won't delete for another device: the apps refuse to delete a baby or a
-# pick-list entry that is still in use, and an unknown type can't be checked.
+# What ``delete_record`` won't delete for another device, and ``edit_record`` won't edit: the
+# apps refuse to delete a baby or a pick-list entry that is still in use, they aren't records
+# with a time and a note, and an unknown type can't be checked.
 _NOT_DELETABLE_FROM_OTHERS = (
     Baby,
     MedicationSelection,
@@ -322,7 +325,7 @@ class SyncEngine:
         self._pending: _Pending | None = None
         self._created: set[str] = set()
         self._add_numbers: dict[str, int] = {}  # object_id -> number of this device's add
-        # Objects this device posted an update to (a sleep's end, or photos added).
+        # Objects this device posted an update to (a sleep's end, photos added, or an edit).
         self._own_updates: set[str] = set()
         self._logged_unknown_types: set[str] = set()
         self._account_id: int | None = None
@@ -495,6 +498,69 @@ class SyncEngine:
             assert isinstance(updated, Joy | Milestone | OtherActivity)
             await self._send(target, number, OP_UPDATE, encode_transaction(updated))
             return updated
+
+    async def edit_record(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Record:
+        """Change the time or the note of a saved record, whichever device made it: post an
+        update (opcode 1), as the apps do when a record is edited.
+
+        ``time`` (aware) is when the record happened, or started for a sleep, a nursing, or a
+        pump; a sleep's or nursing's length is kept, so its end moves too. ``timezone_offset``
+        changes the record's zone, which is otherwise kept. ``note`` replaces the note ("" to
+        clear it). The update carries the record as last saved with only those keys,
+        ``newFlage`` false, and ``timestamp`` changed, and the timestamp is set as for
+        ``add_pictures``. Returns the record as updated. When nothing would change, the record
+        is returned as it is and nothing is posted, so a retry after a write that landed is
+        safe.
+
+        It edits a baby's record or a pump. Refused before any request: ``ValueError`` for
+        nothing to change or a bad value, ``RecordNotFoundError`` for a record never seen or
+        deleted, and ``WrongRecordTypeError`` for a baby, a pick-list entry, or a record of a
+        type the library doesn't know. ``object_id`` can be in either case.
+        """
+        changes = common_changes(time=time, timezone_offset=timezone_offset, note=note)
+        return await self._edit(target, object_id, changes)
+
+    async def _edit(
+        self, target: WriteTarget, object_id: str, changes: Mapping[str, Any]
+    ) -> Record:
+        """The shared path of an edit: check, catch up, and post the record as last saved with
+        ``changes`` applied. Nothing is posted when the record already has them."""
+        async with self._lock:
+            self._check_can_write(target)
+            object_id = self._resolve_id(object_id, self._records, self._tombstones) or object_id
+            record = self._editable(object_id)
+            if _already_has(record, changes):
+                return record
+            # Every device's log, not just this one's: the update carries the whole record, so
+            # it must hold whatever another device saved since the last sync.
+            await self._catch_up(target)
+            number = await self._prepare(target)
+            record = self._editable(object_id)  # as last saved, after the catch-up
+            if _already_has(record, changes):
+                return record
+            updated = decode_payload(edited_payload(record, changes, _update_stamp(record)))
+            await self._send(target, number, OP_UPDATE, encode_transaction(updated))
+            return updated
+
+    def _editable(self, object_id: str) -> Record:
+        """The baby's record or pump ``object_id`` names, or raise why it can't be edited."""
+        if object_id in self.babies():
+            raise WrongRecordTypeError(f"record {object_id} is a Baby, not a baby's record")
+        record = self._saved_record(object_id)
+        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS):
+            raise WrongRecordTypeError(
+                f"record {object_id} is a {record.record_type or 'record'}, "
+                "not a baby's record or a pump"
+            )
+        return record
 
     def _picturable(self, object_id: str) -> Joy | Milestone | OtherActivity:
         """The joy, milestone, or activity ``object_id`` names, or raise why photos can't be
@@ -1752,6 +1818,12 @@ def _wanted(value: object, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise InvalidSelectionNameError(what, value)
     return value
+
+
+def _already_has(record: Record, changes: Mapping[str, Any]) -> bool:
+    """Whether the saved record already holds every edited key with its new value."""
+    payload = record.to_payload()
+    return all(key in payload and payload[key] == value for key, value in changes.items())
 
 
 def _update_stamp(record: Record) -> datetime:
