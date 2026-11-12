@@ -265,6 +265,15 @@ _EMBEDDED_ENTRY_FIELDS = (
     "desc",
 )
 
+# Where a record keeps the plain ID of the pick-list entry it names, when it embeds none. A
+# dose keeps its medicine's under ``medID``, which the model doesn't name.
+_PLAIN_ENTRY_FIELDS: tuple[tuple[type[Record], str], ...] = (
+    (Milestone, "milestone_selection_id"),
+    (Vaccine, "vacc_id"),
+    (OtherFeed, "type_id"),
+    (OtherActivity, "desc_id"),
+)
+
 STATE_VERSION = 4
 # How this library reads a seed. Raise it when a fix reads more out of seeds: state saved at an
 # older format reads the seed again (records merge idempotently).
@@ -2543,11 +2552,7 @@ class SyncEngine:
     def _apply_one(self, device_uuid: str, transaction: RawTransaction) -> bool:
         where = f"device {device_uuid} number {transaction.sync_id}"
         if transaction.op_code == OP_RELIVE:
-            # A Relive needs no change here: it is only posted for a baby or pick-list entry
-            # that records still use, and ``babies()`` and the choice lists are built from
-            # those records as well as from the entry's own record.
-            _LOGGER.debug("Not applying a Relive (%s)", where)
-            return False
+            return self._apply_relive(device_uuid, transaction, where)
         if transaction.op_code == OP_CONFLICT:
             return self._apply_conflict(device_uuid, transaction, where)
         if transaction.op_code not in (OP_ADD, OP_UPDATE, OP_DELETE):
@@ -2594,6 +2599,34 @@ class SyncEngine:
                 self._add_numbers.pop(record.object_id, None)  # a newer delete rejected the add
         return True
 
+    def _apply_relive(self, device_uuid: str, transaction: RawTransaction, where: str) -> bool:
+        """Bring back a baby or pick-list entry whose delete another device refused: an app
+        that still has records of one posts a Relive of its copy. The copy is stored when this
+        engine holds a delete of the entry, or never had it; an entry that is still here is
+        left as it is.
+
+        A delete that is read only after its Relive still applies here, since neither says
+        which came first. ``babies()`` and the choice lists are built from the records that
+        use an entry as well as from its own record, so it stays usable either way.
+        """
+        try:
+            record = decode_transaction(transaction.transaction)
+        except TransactionDecodeError as err:
+            _LOGGER.warning("Skipping undecodable Relive (%s): %s", where, err)
+            return False
+        if record.record_type not in _NAMED_TYPES:
+            _LOGGER.warning("Skipping a Relive of a %s (%s)", record.record_type or "record", where)
+            return False
+        if self._resolve_id(record.object_id, self._records) is not None:
+            _LOGGER.debug("A Relive of an entry that is still here changes nothing (%s)", where)
+            return False
+        gone = self._resolve_id(record.object_id, self._tombstones)
+        if gone is not None:
+            del self._tombstones[gone]
+        stamp = record.timestamp.timestamp() if record.timestamp is not None else 0.0
+        self._store(record, _Version(stamp, _RANK_UPDATE, device_uuid, transaction.sync_id))
+        return True
+
     def _apply_conflict(self, device_uuid: str, transaction: RawTransaction, where: str) -> bool:
         """Fold a Conflict's loser into its winner, as the apps do: the winner is stored, the
         loser's own record goes, and every record that names the loser names the winner
@@ -2616,6 +2649,11 @@ class SyncEngine:
                 loser.record_type or "record",
                 where,
             )
+            return False
+        folded_into = self._winner_of(winner.object_id)
+        if folded_into is not None and folded_into.upper() == loser.object_id.upper():
+            # This winner was already folded into this loser. Folding back would leave neither.
+            _LOGGER.debug("Skipping a Conflict that reverses one already applied (%s)", where)
             return False
         stamp = winner.timestamp.timestamp() if winner.timestamp is not None else 0.0
         self._store(winner, _Version(stamp, _RANK_UPDATE, device_uuid, transaction.sync_id))
@@ -2662,6 +2700,20 @@ class SyncEngine:
             named = embedded.get("objectID")
             if isinstance(named, str) and (winner := self._winner_of(named)):
                 changes[name] = {**embedded, "objectID": winner}
+        # A seed row whose entry the seed doesn't hold names it by a plain ID instead.
+        for kind, name in _PLAIN_ENTRY_FIELDS:
+            named = getattr(record, name, None) if isinstance(record, kind) else None
+            if isinstance(named, str) and (winner := self._winner_of(named)):
+                changes[name] = winner
+        extra_keys = ("babyID", "medID") if isinstance(record, Medication) else ("babyID",)
+        extra = {
+            key: winner
+            for key in extra_keys
+            if isinstance(named := record.extra.get(key), str)
+            and (winner := self._winner_of(named))
+        }
+        if extra:
+            changes["extra"] = {**record.extra, **extra}
         return replace(record, **changes) if changes else record
 
     def merged_entries(self) -> dict[str, str]:
@@ -2775,6 +2827,10 @@ class SyncEngine:
         read with a default, so either version 3 shape loads. Version 4 state saved before
         ``created_numbers`` existed loads too: see ``own_writes`` for how its order is
         recovered. A ``device_uuid`` that differs from the saved one raises ``ValueError``.
+
+        State saved before Conflicts were folded loads with none folded, and has already
+        passed any that were in the logs then. Those are folded by an engine that reads the
+        logs afresh, with no saved state.
         """
         version = data.get("version")
         if version not in (1, 2, 3, STATE_VERSION):

@@ -281,3 +281,146 @@ async def test_a_chain_of_conflicts_ends_at_the_last_winner(
     oatmeals = [c.object_id for c in engine.food_choices() if c.name == "Oatmeal"]
     assert oatmeals == [third["objectID"]]
     assert named_food(engine, rid(4)) == third["objectID"]
+
+
+# --- Edge cases found by a review --------------------------------------------------------
+
+
+async def test_a_relive_brings_back_an_entry_this_engine_had_deleted(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server, FOOD, solid_of(FOOD, 3))
+    fake_server.add_device(TABLET)
+    engine = await synced(client)
+    fake_server.add_transaction(TABLET, OP_DELETE, {**FOOD, "newFlage": "false"})
+    await engine.sync(client)
+    assert engine.is_deleted(FOOD["objectID"])
+
+    # The phone, which has a solid food of it, refused the delete and posts its copy.
+    fake_server.add_transaction(PHONE, OP_RELIVE, {**FOOD, "newFlage": "false"})
+    await engine.sync(client)
+
+    assert not engine.is_deleted(FOOD["objectID"])
+    assert FOOD["objectID"] not in engine.deleted_ids()
+    assert engine.records[FOOD["objectID"]].to_payload()["name"] == "Oatmeal"
+    # And the state says the same after a reload.
+    reloaded = SyncEngine.from_dict(json.loads(json.dumps(engine.to_dict())))
+    assert not reloaded.is_deleted(FOOD["objectID"])
+    assert FOOD["objectID"] in reloaded.records
+
+
+async def test_a_relive_brings_back_a_baby_and_a_later_delete_still_applies(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    baby = baby_payload()
+    seed(fake_server, baby)
+    fake_server.add_device(TABLET)
+    engine = await synced(client)
+    fake_server.add_transaction(TABLET, OP_DELETE, baby)
+    await engine.sync(client)
+    assert engine.is_deleted(BABY_ID)
+
+    fake_server.add_transaction(PHONE, OP_RELIVE, baby)
+    await engine.sync(client)
+    assert not engine.is_deleted(BABY_ID)
+    assert engine.records[BABY_ID].to_payload()["name"] == "Test Baby"
+
+    # A delete after the Relive is a new delete, and applies.
+    fake_server.add_transaction(TABLET, OP_DELETE, baby)
+    await engine.sync(client)
+    assert engine.is_deleted(BABY_ID)
+
+
+async def test_a_relive_of_an_entry_never_seen_stores_it(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server)
+    fake_server.add_transaction(PHONE, OP_RELIVE, FOOD)
+
+    engine = await synced(client)
+
+    assert engine.find_food("Oatmeal").object_id == FOOD["objectID"]
+    assert FOOD["objectID"] in engine.records
+
+
+async def test_a_relive_of_an_entry_still_here_changes_nothing(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server, FOOD)
+    engine = await synced(client)
+    before = engine.records[FOOD["objectID"]]
+
+    fake_server.add_transaction(PHONE, OP_RELIVE, {**FOOD, "name": "An Older Copy"})
+    await engine.sync(client)
+
+    assert engine.records[FOOD["objectID"]] == before
+
+
+async def test_a_relive_of_anything_else_is_skipped_with_a_warning(
+    client: BabyTrackerClient, fake_server: FakeSyncServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    seed(fake_server)
+    fake_server.add_transaction(PHONE, OP_RELIVE, payload_for("Diaper", rid(9)))
+
+    with caplog.at_level(logging.WARNING, logger="pybabytracker"):
+        engine = await synced(client)
+
+    assert rid(9) not in engine.records
+    assert any("Relive of a Diaper" in r.getMessage() for r in caplog.records)
+
+
+async def test_two_conflicts_that_reverse_each_other_leave_one_entry(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server, FOOD, TWIN, solid_of(FOOD, 3), solid_of(TWIN, 4))
+    fake_server.add_device(TABLET)
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(FOOD, TWIN))
+    fake_server.add_transaction(TABLET, OP_CONFLICT, conflict(TWIN, FOOD))
+
+    engine = await synced(client)
+
+    # Whichever was read first stands: one Oatmeal is left, and both solid foods name it.
+    [(loser, winner)] = engine.merged_entries().items()
+    assert {loser, winner.upper()} == {FOOD["objectID"].upper(), TWIN["objectID"].upper()}
+    assert winner in engine.records
+    assert [c.object_id for c in engine.food_choices() if c.name == "Oatmeal"] == [winner]
+    assert {named_food(engine, rid(3)), named_food(engine, rid(4))} == {winner}
+    # A solid food of the loser that arrives later is folded the same way.
+    late = solid_of(FOOD if winner == TWIN["objectID"] else TWIN, 5)
+    fake_server.add_transaction(PHONE, OP_ADD, late)
+    await engine.sync(client)
+    assert named_food(engine, rid(5)) == winner
+
+
+async def test_a_fold_repoints_a_record_that_names_the_loser_by_a_plain_id(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    # As seed rows whose entry the seed doesn't hold: only the entry's ID, in either case.
+    plain = payload_for("OtherFeed", rid(4))
+    plain.pop("feedType", None)
+    plain["typeID"] = TWIN["objectID"].lower()
+    dose = payload_for("Medication", rid(5))
+    dose.pop("medicationSelection", None)
+    dose["medID"] = "M-LOSER"
+    winner_medicine = {
+        "BCObjectType": "MedicationSelection",
+        "objectID": "M-WINNER",
+        "name": "Test Drops",
+        "unit": "ml",
+        "timestamp": "2026-02-25 16:33:51 +0000",
+    }
+    seed(fake_server, FOOD, TWIN, plain, dose, winner_medicine)
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(FOOD, TWIN))
+    fake_server.add_transaction(
+        PHONE, OP_CONFLICT, conflict(winner_medicine, {**winner_medicine, "objectID": "M-LOSER"})
+    )
+    late = payload_for("OtherFeed", rid(6))
+    late.pop("feedType", None)
+    late["typeID"] = TWIN["objectID"]
+    fake_server.add_transaction(PHONE, OP_ADD, late)
+
+    engine = await synced(client)
+
+    assert engine.records[rid(4)].to_payload()["typeID"] == FOOD["objectID"]
+    assert engine.records[rid(6)].to_payload()["typeID"] == FOOD["objectID"]
+    assert engine.records[rid(5)].to_payload()["medID"] == "M-WINNER"
