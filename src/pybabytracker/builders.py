@@ -778,11 +778,7 @@ def draft_milestone(
     """A milestone reached, embedding the milestone it marks as ``milestoneType``."""
     # An iPhone-shaped entry (typed) is embedded as the iPhone app embeds one: not new, and dated
     # 1970. One of any other shape, such as an Android phone's, is embedded as it synced.
-    embedded = (
-        _embedded("MilestoneSelection", selection)
-        if "BCObjectType" in selection
-        else dict(selection)
-    )
+    embedded = embedded_milestone(selection)
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Milestone:
@@ -819,11 +815,7 @@ def draft_activity(
     # An iPhone-shaped type (typed) is embedded as the iPhone app embeds one: not new, and dated
     # 1970, as every custom type in the iPhone's synced activities is. One of any other shape,
     # such as an Android phone's, is embedded as it synced.
-    embedded = (
-        _embedded("OtherActivityDescription", selection)
-        if "BCObjectType" in selection
-        else dict(selection)
-    )
+    embedded = embedded_activity_type(selection)
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherActivity:
@@ -974,6 +966,67 @@ def _embedded(type_name: str, selection: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _embedded_if_typed(type_name: str, selection: Mapping[str, Any]) -> dict[str, Any]:
+    """An iPhone-shaped entry (typed) as the iPhone app embeds one; one of any other shape, such
+    as an Android phone's, as it synced."""
+    return _embedded(type_name, selection) if "BCObjectType" in selection else dict(selection)
+
+
+def embedded_milestone(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """A milestone as a record embeds it under ``milestoneType``."""
+    return _embedded_if_typed("MilestoneSelection", selection)
+
+
+def embedded_vaccine(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """A vaccine as a record embeds it under ``vaccineType``."""
+    return _embedded_if_typed("VaccineSelection", selection)
+
+
+def embedded_activity_type(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """An activity type as an activity embeds it under ``desc``."""
+    return _embedded_if_typed("OtherActivityDescription", selection)
+
+
+def embedded_food(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """A food as a solid food embeds it under ``feedType``."""
+    return _embedded("OtherFeedSelection", selection)
+
+
+def embedded_medicine(selection: Mapping[str, Any]) -> dict[str, Any]:
+    """A medicine as a dose embeds it under ``medicationSelection``. iPhone-shaped here means it
+    has the iPhone's "isPresciption" flag; an Android phone's has "prescription" instead."""
+    if "isPresciption" in selection:
+        return _embedded("MedicationSelection", selection)
+    return dict(selection)
+
+
+def entry_change(
+    record: Record,
+    key: str,
+    id_key: str,
+    embedded: Mapping[str, Any] | None,
+    other: Mapping[str, Any],
+) -> Edit:
+    """The edit that makes a saved record name another pick-list entry, with any ``other``
+    changes: ``embedded`` (the entry as the record embeds one) goes under ``key``, and
+    ``id_key``, where a seed row keeps an entry's plain ID instead, is dropped so the record
+    names one entry. An entry the record already names, by either key and in any case, is left
+    as it is saved. ``None`` changes no entry."""
+    changes = dict(other)
+    if embedded is None:
+        return Edit(changes)
+    payload = record.to_payload()
+    saved = payload.get(key)
+    named = (saved.get("objectID") if isinstance(saved, Mapping) else None, payload.get(id_key))
+    wanted = embedded.get("objectID")
+    if isinstance(wanted, str) and wanted.lower() in {
+        n.lower() for n in named if isinstance(n, str)
+    }:
+        return Edit(changes)
+    changes[key] = dict(embedded)
+    return Edit(changes, (id_key,))
+
+
 def draft_other_feed(
     selection: Mapping[str, Any],
     *,
@@ -996,7 +1049,7 @@ def draft_other_feed(
     written_unit = _checked_food_unit(unit)
     if not isinstance(meal_id, str) or not meal_id.strip():
         raise ValueError("meal_id must be text")
-    embedded = _embedded("OtherFeedSelection", selection)
+    embedded = embedded_food(selection)
     desc = {
         "BCObjectType": "FeedDescription",
         "newFlage": "true",
@@ -1238,11 +1291,7 @@ def draft_medication(
     # iPhone-shaped means it has the iPhone's "isPresciption" flag. An Android phone's medicine
     # has "prescription" instead, with JSON booleans, and nothing shows how either app reads a
     # mix of the two, so it keeps its own shape.
-    embedded = (
-        _embedded("MedicationSelection", selection)
-        if "isPresciption" in selection
-        else dict(selection)
-    )
+    embedded = embedded_medicine(selection)
     if amount is None:
         amount = _usual_dose(embedded)
         if amount is None:
@@ -1275,9 +1324,7 @@ def draft_vaccine(
     """
     # An iPhone-shaped entry (typed) is embedded as the iPhone app embeds one: not new, and dated
     # 1970. One of any other shape, such as an Android phone's, is embedded as it synced.
-    embedded = (
-        _embedded("VaccineSelection", selection) if "BCObjectType" in selection else dict(selection)
-    )
+    embedded = embedded_vaccine(selection)
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Vaccine:
