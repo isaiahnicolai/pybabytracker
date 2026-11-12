@@ -122,15 +122,19 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   start moves.
 - `edit_diaper` (`status`, `amount`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
   `right_minutes`, `finish_side`), `edit_sleep` (`start`, `end`), `edit_temperature`
-  (`temperature`), `edit_growth` (`weight`, `length`, `head`), `edit_medication` (`amount`),
-  `edit_other_feed` (`amount`, `unit`), `edit_activity` (`duration`), and `edit_pump` (`amount`
+  (`temperature`), `edit_growth` (`weight`, `length`, `head`), `edit_medication` (`amount`,
+  `medicine`), `edit_other_feed` (`amount`, `unit`, `food`), `edit_activity` (`duration`,
+  `activity`), `edit_milestone` (`milestone`), `edit_vaccine` (`vaccine`), and `edit_pump` (`amount`
   or `left_volume`/`right_volume`, `left_minutes`, `right_minutes`, `finish_side`) change a
   record's own fields the same way, with the time, zone, and note in the same update, and with the checks of
   the matching `add_*`. A value not given is kept: a nursing's other side, and a sleep's end
   when its start moves (so it gets longer or shorter). When a nursing's minutes change, the keys
   an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
-  `NursingSession` keeps its minutes. The medicine, food, or activity type a record embeds
-  can't be changed by an edit: delete the record and add another.
+  `NursingSession` keeps its minutes. A `medicine`, `food`, `activity`, `milestone`, or
+  `vaccine` is a name or ID from the matching `*_choices`, embedded in place of the entry the
+  record had as the matching `add_*` embeds one (expected, not yet seen in synced data: no
+  captured edit changes a record's entry). Naming the entry it already has changes nothing. A
+  solid food's meal can't be changed: delete the record and add another.
 - `add_baby(client, name, birth=, boy=, due=None, photo=None)` adds a baby with a `Baby` record
   (expected, not yet seen in synced data: only a baby's updates have been). The returned baby's
   `object_id` is the `baby_id` for its records. A name another baby has raises

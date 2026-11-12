@@ -124,7 +124,13 @@ from .builders import (
     draft_vaccine,
     draft_vaccine_type,
     edited_payload,
+    embedded_activity_type,
+    embedded_food,
+    embedded_medicine,
+    embedded_milestone,
+    embedded_vaccine,
     ended_sleep_payload,
+    entry_change,
     growth_changes,
     medication_changes,
     nursing_edit,
@@ -782,19 +788,38 @@ class SyncEngine:
         object_id: str,
         *,
         amount: float | None = None,
+        medicine: str | None = None,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str | None = None,
     ) -> Medication:
         """Change a saved dose: its ``amount`` (more than zero, as for ``add_medication``),
-        and its time, zone, and note as for ``edit_record``, whose rules it shares. Give at
-        least one. The medicine itself can't be changed: delete the dose and add another.
+        its ``medicine``, and its time, zone, and note as for ``edit_record``, whose rules it
+        shares. Give at least one.
+
+        ``medicine`` is a name or ID from ``medicine_choices()``, found as for
+        ``add_medication`` and embedded the same way, in place of the one the dose had. The
+        amount stays as saved unless given, whatever the new medicine's unit. Naming the
+        medicine the dose already has changes nothing.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
-        edit = Edit(_some({**medication_changes(amount), **common}))
-        record = await self._edit(target, object_id, lambda record: edit, Medication)
+        fixed = {
+            **medication_changes(amount),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+        }
+        if medicine is None:
+            _some(fixed)
+        else:
+            self.find_medicine(medicine)  # a bad, unknown, or ambiguous one fails before the lock
+
+        def changes_for(saved: Record) -> Edit:
+            entry = (
+                None
+                if medicine is None
+                else embedded_medicine(self.find_medicine(medicine).selection)
+            )
+            return entry_change(saved, "medicationSelection", "medID", entry, fixed)
+
+        record = await self._edit(target, object_id, changes_for, Medication)
         assert isinstance(record, Medication)
         return record
 
@@ -805,20 +830,34 @@ class SyncEngine:
         *,
         amount: float | None = None,
         unit: str | None = None,
+        food: str | None = None,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str | None = None,
     ) -> OtherFeed:
         """Change a saved solid food: its ``amount`` and ``unit`` (checked as for
-        ``add_other_feed``), and its time, zone, and note as for ``edit_record``, whose rules
-        it shares. Give at least one. The food and the meal can't be changed: delete the
-        record and add another.
+        ``add_other_feed``), its ``food``, and its time, zone, and note as for ``edit_record``,
+        whose rules it shares. Give at least one.
+
+        ``food`` is a name or ID from ``food_choices()``, found as for ``add_other_feed`` and
+        embedded the same way, in place of the one the record had. The amount and unit stay as
+        saved unless given. Naming the food the record already has changes nothing. The meal
+        can't be changed: delete the record and add another.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
-        edit = Edit(_some({**other_feed_changes(amount, unit), **common}))
-        record = await self._edit(target, object_id, lambda record: edit, OtherFeed)
+        fixed = {
+            **other_feed_changes(amount, unit),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+        }
+        if food is None:
+            _some(fixed)
+        else:
+            self.find_food(food)  # a bad, unknown, or ambiguous one fails before the lock
+
+        def changes_for(saved: Record) -> Edit:
+            entry = None if food is None else embedded_food(self.find_food(food).selection)
+            return entry_change(saved, "feedType", "typeID", entry, fixed)
+
+        record = await self._edit(target, object_id, changes_for, OtherFeed)
         assert isinstance(record, OtherFeed)
         return record
 
@@ -828,21 +867,111 @@ class SyncEngine:
         object_id: str,
         *,
         duration: int | None = None,
+        activity: str | None = None,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str | None = None,
     ) -> OtherActivity:
         """Change a saved activity: its ``duration`` (whole minutes, as for
-        ``add_activity``), and its time, zone, and note as for ``edit_record``, whose rules it
-        shares. Give at least one. The activity type can't be changed: delete the record and
-        add another.
+        ``add_activity``), its type, and its time, zone, and note as for ``edit_record``, whose
+        rules it shares. Give at least one.
+
+        ``activity`` is a name or ID from ``activity_choices()``, found as for ``add_activity``
+        and embedded the same way, in place of the type the record had. Naming the type it
+        already has changes nothing.
         """
-        common = common_changes(
+        fixed = {
+            **activity_changes(duration),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+        }
+        if activity is None:
+            _some(fixed)
+        else:
+            self.find_activity(activity)  # a bad, unknown, or ambiguous one fails before the lock
+
+        def changes_for(saved: Record) -> Edit:
+            entry = (
+                None
+                if activity is None
+                else embedded_activity_type(self.find_activity(activity).selection)
+            )
+            return entry_change(saved, "desc", "descID", entry, fixed)
+
+        record = await self._edit(target, object_id, changes_for, OtherActivity)
+        assert isinstance(record, OtherActivity)
+        return record
+
+    async def edit_milestone(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        milestone: str | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Milestone:
+        """Change a saved milestone: which ``milestone`` it marks, and its time, zone, and note
+        as for ``edit_record``, whose rules it shares. Give at least one.
+
+        ``milestone`` is a name or ID from ``milestone_choices`` for the record's baby, found
+        as for ``add_milestone`` and embedded the same way, in place of the one the record had.
+        Naming the milestone it already has changes nothing. Its photos are changed with
+        ``add_pictures`` and ``remove_pictures``.
+        """
+        fixed = common_changes(
             time=time, timezone_offset=timezone_offset, note=note, required=False
         )
-        edit = Edit(_some({**activity_changes(duration), **common}))
-        record = await self._edit(target, object_id, lambda record: edit, OtherActivity)
-        assert isinstance(record, OtherActivity)
+        if milestone is None:
+            _some(fixed)
+        else:
+            _wanted(milestone, "milestone")
+
+        def changes_for(saved: Record) -> Edit:
+            entry = (
+                None
+                if milestone is None
+                else embedded_milestone(self.find_milestone(milestone, saved.baby_id).selection)
+            )
+            return entry_change(saved, "milestoneType", "milestoneSelectionID", entry, fixed)
+
+        record = await self._edit(target, object_id, changes_for, Milestone)
+        assert isinstance(record, Milestone)
+        return record
+
+    async def edit_vaccine(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        vaccine: str | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Vaccine:
+        """Change a saved vaccine: which ``vaccine`` was given, and its time, zone, and note as
+        for ``edit_record``, whose rules it shares. Give at least one.
+
+        ``vaccine`` is a name or ID from ``vaccine_choices()``, found as for ``add_vaccine`` and
+        embedded the same way, in place of the one the record had. Naming the vaccine it
+        already has changes nothing.
+        """
+        fixed = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        if vaccine is None:
+            _some(fixed)
+        else:
+            self.find_vaccine(vaccine)  # a bad, unknown, or ambiguous one fails before the lock
+
+        def changes_for(saved: Record) -> Edit:
+            entry = (
+                None if vaccine is None else embedded_vaccine(self.find_vaccine(vaccine).selection)
+            )
+            return entry_change(saved, "vaccineType", "vaccID", entry, fixed)
+
+        record = await self._edit(target, object_id, changes_for, Vaccine)
+        assert isinstance(record, Vaccine)
         return record
 
     async def edit_pump(
