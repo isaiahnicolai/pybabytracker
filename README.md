@@ -116,6 +116,7 @@ key.
 | `add_temperature(client, baby_id, temperature, ...)` | `Temperature` | `Measurement(value, "F")` or `Measurement(value, "C")`, not converted and rounded to two decimals; must be in `TEMPERATURE_RANGES` |
 | `add_other_feed(client, baby_id, food, amount=, unit=, meal_id=None, ...)` | `OtherFeed` | a solid food (or water, juice); `food` is a name or ID from `food_choices()`, `amount` counts `unit` (free text: "Oz", "Pieces", "Tsp") |
 | `add_food(client, name, bottle=False)` | `OtherFeedSelection` | a new food for the pick list, posted before the first solid food that names it; belongs to the account, so no `baby_id` |
+| `add_medicine(client, name, unit=, amount_per_time=, interval=, prescription=False, description="")` | `MedicationSelection` | a new medicine for the pick list, posted before the first dose of it; `interval` a `timedelta` of whole hours, written in minutes; belongs to the account |
 
 - A milestone names one from the app's pick list: one of the 20 it ships with
   (`BUILT_IN_MILESTONES`, under the app's own `EasyLogSeed` IDs, which never sync) or one added
@@ -129,7 +130,13 @@ key.
   list isn't supported yet. Vaccines work the same way: the app's 10 built-ins
   (`BUILT_IN_VACCINES`) plus synced ones, `vaccine_choices()`, `find_vaccine`, and
   `UnknownVaccineError`. A medicine has no built-ins: `medicine_choices()` lists the ones doses
-  already carry, and a `Medication` is logged against one by name or ID. Activity types work
+  already carry, and a `Medication` is logged against one by name or ID. `add_medicine` adds
+  one as the iPhone app does (`isPresciption`, the app's spelling, and the interval in
+  minutes). A dose embeds an iPhone-shaped medicine (one with `isPresciption`) as the iPhone
+  app does: typed, `newFlage` "false", and the 1970 timestamp. Any other shape, such as an
+  Android phone's, is embedded as it synced. Only a medicine already in `medicine_choices()`
+  blocks a repeated name, so one in the account's seed but never used isn't caught.
+  Activity types work
   like vaccines: the app's 5 built-ins (`BUILT_IN_ACTIVITIES`: Crawling, Cruising, Tummy Time, TV
   Time, Story Time) plus ones added in the app, `activity_choices()`, `find_activity`, and
   `UnknownActivityError`. The app has no bath screen: a bath is an activity of a type added in
@@ -156,9 +163,10 @@ key.
 - How well this is checked: a built-in milestone ("Back home") and vaccine ("HepB") and a
   medicine dose were posted on iOS and read back unchanged, and the app showed each as the entry
   it is. The other built-in IDs, Android, and a custom milestone or vaccine are unverified. A
-  pick-list entry syncing as its own transaction (`MilestoneSelection`,
-  `VaccineSelection`, `MedicationSelection`) is an expected shape, not yet seen in synced data.
-  A medicine's `interval` is in minutes.
+  pick-list entry syncing as its own transaction (`MilestoneSelection`, `VaccineSelection`) is an
+  expected shape, not yet seen in synced data; a medicine has been (captured from an iPhone on
+  2026-11-11), and `add_medicine` is verified by that capture only, not run live. A medicine's
+  `interval` is in minutes.
 - Volumes are `Volume(value, "oz")` or `Volume(value, "ml")`, written as a `VolumeMeasure` with
   `englishMeasure` `"true"` (ounces) or `"false"` (milliliters), rounded to 2 decimals (an integer
   when whole). The number is written as given, with no conversion, as the app does.

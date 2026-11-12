@@ -54,6 +54,7 @@ from .models import (
     Joy,
     Measurement,
     Medication,
+    MedicationSelection,
     Milestone,
     Nursing,
     OtherActivity,
@@ -115,6 +116,14 @@ def _offset(moment: datetime, name: str) -> int:
     return int(offset.total_seconds())
 
 
+def _finite(value: float) -> bool:
+    """Whether a number is finite; false for an int too large for a float."""
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _number(value: float) -> int | float:
     """A volume or dose as the app writes it: rounded to 2 decimals, an integer when whole."""
     rounded = round(float(value), 2)
@@ -127,7 +136,7 @@ def _checked(volume: object, name: str = "volume") -> Volume:
     if volume.unit not in (UNIT_OUNCES, UNIT_MILLILITERS):
         raise ValueError(f"unknown {name} unit {volume.unit!r}: use 'oz' or 'ml'")
     value = volume.value
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not _finite(value):
         raise ValueError(f"{name} must be a finite number")
     if value < 0:
         raise ValueError(f"{name} can't be negative")
@@ -353,7 +362,7 @@ def _checked_measure(
         units = " or ".join(repr(unit) for unit in ranges)
         raise ValueError(f"unknown {name} unit {reading.unit!r}: use {units}")
     value = reading.value
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not _finite(value):
         raise ValueError(f"{name} must be a finite number")
     low, high = ranges[reading.unit]
     if not low <= value <= high:
@@ -463,6 +472,16 @@ MAX_UNIT_LENGTH = 30
 _EMBEDDED_TIMESTAMP = "1970-01-01 00:00:00 +0000"
 
 
+def _embedded(type_name: str, selection: Mapping[str, Any]) -> dict[str, Any]:
+    """A pick-list entry as the iPhone app embeds it in a record: typed, not new, and dated 1970."""
+    return {
+        "BCObjectType": type_name,
+        **selection,
+        "newFlage": "false",
+        "timestamp": _EMBEDDED_TIMESTAMP,
+    }
+
+
 def draft_other_feed(
     selection: Mapping[str, Any],
     *,
@@ -483,7 +502,7 @@ def draft_other_feed(
     """
     if isinstance(amount, bool) or not isinstance(amount, int | float):
         raise ValueError("amount must be a number")
-    if not math.isfinite(amount) or _number(amount) <= 0:
+    if not _finite(amount) or _number(amount) <= 0:
         raise ValueError("amount must be more than zero")
     if amount > MAX_OTHER_FEED_AMOUNT:
         raise ValueError(f"amount can't be more than {MAX_OTHER_FEED_AMOUNT}")
@@ -493,13 +512,7 @@ def draft_other_feed(
         raise ValueError(f"unit can't be longer than {MAX_UNIT_LENGTH} characters")
     if not isinstance(meal_id, str) or not meal_id.strip():
         raise ValueError("meal_id must be text")
-    # As the iPhone app embeds a food: typed, not new, and dated 1970.
-    embedded = {
-        "BCObjectType": "OtherFeedSelection",
-        **selection,
-        "newFlage": "false",
-        "timestamp": _EMBEDDED_TIMESTAMP,
-    }
+    embedded = _embedded("OtherFeedSelection", selection)
     written_unit = unit.strip()
     value = _number(amount)
     desc = {
@@ -553,12 +566,86 @@ def draft_food(name: str, *, bottle: bool) -> Draft[OtherFeedSelection]:
     return Draft(OtherFeedSelection, build)
 
 
+# The longest gap between doses. The app takes whole hours; an iPhone has synced 555, which is a
+# sighting, not a limit the app is known to enforce.
+MAX_MEDICINE_INTERVAL = timedelta(hours=999)
+# The largest usual dose: a guard against a typo, like MAX_OTHER_FEED_AMOUNT.
+MAX_MEDICINE_AMOUNT = 1000
+
+
+def _text(value: object, what: str, longest: int) -> str:
+    """``value`` without surrounding spaces, or ``ValueError`` unless it is text of 1 to
+    ``longest`` characters."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{what} must be text")
+    if len(value.strip()) > longest:
+        raise ValueError(f"{what} can't be longer than {longest} characters")
+    return value.strip()
+
+
+def draft_medicine(
+    name: str,
+    *,
+    unit: str,
+    amount_per_time: float,
+    interval: timedelta,
+    prescription: bool,
+    description: str,
+) -> Draft[MedicationSelection]:
+    """A new medicine for the pick list, as the iPhone app syncs one (captured 2026-11-11):
+    ``BCObjectType``, ``objectID``, ``name``, ``desc``, ``unit``, ``amountPerTime``,
+    ``interval`` in minutes, ``isPresciption`` (the app's spelling) "true" or "false",
+    ``newFlage`` "true", and ``timestamp``, with no record fields.
+
+    ``interval`` is the time between doses, a whole number of hours as the app takes it, at
+    most ``MAX_MEDICINE_INTERVAL``. ``amount_per_time`` is the usual dose in ``unit``, which is
+    free text such as "ml" or "Drops". Text is written without surrounding spaces.
+    """
+    written_name = _text(name, "a medicine's name", MAX_FOOD_NAME_LENGTH)
+    written_unit = _text(unit, "a medicine's unit", MAX_UNIT_LENGTH)
+    if isinstance(amount_per_time, bool) or not isinstance(amount_per_time, int | float):
+        raise ValueError("a medicine's usual dose must be a number")
+    if amount_per_time > MAX_MEDICINE_AMOUNT:
+        raise ValueError(f"a medicine's usual dose can't be more than {MAX_MEDICINE_AMOUNT}")
+    if not _finite(amount_per_time) or _number(amount_per_time) <= 0:
+        raise ValueError("a medicine's usual dose must be a number more than zero")
+    if not isinstance(interval, timedelta):
+        raise ValueError("interval must be a timedelta, such as timedelta(hours=4)")
+    if interval <= timedelta(0) or interval > MAX_MEDICINE_INTERVAL:
+        raise ValueError(f"interval must be more than zero and at most {MAX_MEDICINE_INTERVAL}")
+    if interval % timedelta(hours=1):
+        raise ValueError("interval must be a whole number of hours, as the app takes it")
+    if not isinstance(prescription, bool):
+        raise ValueError("prescription must be True or False")
+    if not isinstance(description, str):
+        raise ValueError("a medicine's description must be text")
+    written_desc = description.strip()
+    usual = _number(amount_per_time)
+    minutes = int(interval / timedelta(minutes=1))
+    flag = "true" if prescription else "false"
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> MedicationSelection:
+        return MedicationSelection(
+            object_id=object_id,
+            name=written_name,
+            desc=written_desc,
+            unit=written_unit,
+            amount_per_time=usual,
+            interval=minutes,
+            new_flag="true",
+            timestamp=timestamp,
+            extra={"isPresciption": flag},
+        )
+
+    return Draft(MedicationSelection, build)
+
+
 def _usual_dose(selection: Mapping[str, Any]) -> int | float | None:
     """A medicine's usual dose (``amountPerTime``), or ``None`` unless it is a number that is
     still above zero once written. Text, a bool, null, zero, and a non-finite number are not a
     usual dose: the caller must give an amount rather than have one guessed."""
     usual = _plain_number(selection.get("amountPerTime"))
-    if usual is None or not math.isfinite(usual) or _number(usual) <= 0:
+    if usual is None or not _finite(usual) or _number(usual) <= 0:
         return None
     return _number(usual)
 
@@ -572,13 +659,22 @@ def draft_medication(
     note: str,
 ) -> Draft[Medication]:
     """A dose of a medicine: ``amount`` in its unit (default its usual dose, ``amountPerTime``),
-    with the medicine embedded as ``medicationSelection``."""
-    embedded = dict(selection)
+    with the medicine embedded as ``medicationSelection``. An iPhone-shaped medicine is embedded
+    as the iPhone app does (typed, ``newFlage`` "false", the 1970 timestamp: captured
+    2026-11-11); one of any other shape, such as an Android phone's, is embedded as it synced."""
+    # iPhone-shaped means it has the iPhone's "isPresciption" flag. An Android phone's medicine
+    # has "prescription" instead, with JSON booleans, and nothing shows how either app reads a
+    # mix of the two, so it keeps its own shape.
+    embedded = (
+        _embedded("MedicationSelection", selection)
+        if "isPresciption" in selection
+        else dict(selection)
+    )
     if amount is None:
         amount = _usual_dose(embedded)
         if amount is None:
             raise NoUsualDoseError(_selection_name(embedded))
-    if isinstance(amount, bool) or not isinstance(amount, int | float) or not math.isfinite(amount):
+    if isinstance(amount, bool) or not isinstance(amount, int | float) or not _finite(amount):
         raise ValueError("a dose's amount must be a finite number")
     if amount <= 0:
         raise ValueError("a dose's amount must be more than zero")
