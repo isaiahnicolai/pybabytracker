@@ -24,6 +24,7 @@ from .exceptions import (
     DownloadRefusedError,
     NoResponseError,
     ProtocolError,
+    UnknownAccountError,
 )
 from .models import MAX_PICTURE_BYTES, check_jpeg, is_account_id, is_plain_file_name
 
@@ -190,6 +191,31 @@ class BabyTrackerClient:
             if status != 401:
                 _raise_for_status(status)
             self._signed_in = False
+
+    async def request_password_reset(self, language: str = "en") -> None:
+        """Ask the service to email this client's address a link to reset the password, as the
+        app's "forgot password" screen does: ``POST /account/forgot_password``.
+
+        No session is needed and none is made. ``language`` is the two-letter code the app
+        sends from the phone's locale. The service answers ``200`` when the email is on its
+        way, and ``400`` when it has no account for the address, which raises
+        ``UnknownAccountError``. Any other error status, or no answer, raises as for the other
+        calls. The password itself doesn't change until the link is used.
+        """
+        if not isinstance(language, str) or not (2 <= len(language) <= 3 and language.isalpha()):
+            raise ValueError("language must be a two- or three-letter language code")
+        status, _ = await self._send(
+            "POST",
+            "/account/forgot_password",
+            {
+                "EmailAddress": self._email,
+                "Language": language.lower(),
+                "AppInfo": {"AccountType": 0, "AppType": 0},
+            },
+        )
+        if status == 400:
+            raise UnknownAccountError("the service has no account for this email address")
+        _raise_for_status(status)
 
     async def get_devices(self) -> list[Device]:
         """Every device in the sync group, with its last transaction number."""
