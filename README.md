@@ -109,6 +109,10 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
   `NursingSession` keeps its minutes. The medicine, food, or activity type a record embeds
   can't be changed by an edit: delete the record and add another.
+- `add_baby(client, name, birth=, boy=, due=None, photo=None)` adds a baby with a `Baby` record
+  (expected, not yet seen in synced data: only a baby's updates have been). The returned baby's
+  `object_id` is the `baby_id` for its records. A name another baby has raises
+  `SelectionExistsError`, since the apps merge two babies of one name.
 - `edit_baby(client, baby_id, name=, birth=, due=, boy=, photo=)` changes a baby with an update
   of its `Baby` record, as the iPhone app does. A `photo` (JPEG bytes) is uploaded first as a new
   uppercase UUID plus ".jpg" and again plus "_l.jpg" (the landscape copy, `landscape_photo` when

@@ -209,6 +209,45 @@ class NewPicture(NamedTuple):
     thumbnail: bytes
 
 
+def draft_baby(
+    name: str,
+    *,
+    birth: datetime,
+    boy: bool,
+    due: datetime | None,
+    picture_name: str | None,
+) -> Draft[Baby]:
+    """A new baby, with the keys an iPhone's ``Baby`` update has (captured 2026-11-12):
+    ``name``, ``dob``, ``gender`` ("true" for a boy), ``newFlage`` "true", and ``timestamp``,
+    plus ``dueDay`` and ``pictureName`` when there is a due date and a photo. The Android app's
+    new-baby screen asks for the same three things (a name, boy or girl, and a birth date) and
+    leaves the other two out when they aren't given. Dates are written in UTC to the second."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("a baby's name must be text")
+    written = name.strip()
+    if len(written) > MAX_BABY_NAME_LENGTH:
+        raise ValueError(f"a baby's name can't be longer than {MAX_BABY_NAME_LENGTH} characters")
+    if not isinstance(boy, bool):
+        raise ValueError("boy must be True or False")
+    dob = _edited_time(birth, "birth")
+    due_day = _edited_time(due, "due") if due is not None else None
+    gender = "true" if boy else "false"
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Baby:
+        return Baby(
+            object_id=object_id,
+            name=written,
+            dob=dob,
+            due_day=due_day,
+            gender=gender,
+            picture_name=picture_name,
+            new_flag="true",
+            timestamp=timestamp,
+        )
+
+    return Draft(Baby, build)
+
+
 def check_pictures(pictures: object) -> tuple[NewPicture, ...]:
     """``pictures`` as a tuple, or ``ValueError`` unless it is a sequence of ``NewPicture``s whose
     photo and thumbnail are each a JPEG of at most ``MAX_PICTURE_BYTES``."""

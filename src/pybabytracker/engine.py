@@ -98,6 +98,7 @@ from .builders import (
     diaper_changes,
     draft_activity,
     draft_activity_type,
+    draft_baby,
     draft_bottle,
     draft_diaper,
     draft_food,
@@ -847,6 +848,64 @@ class SyncEngine:
         record = await self._edit(target, object_id, changes, Pump)
         assert isinstance(record, Pump)
         return record
+
+    async def add_baby(
+        self,
+        target: WriteTarget,
+        name: str,
+        *,
+        birth: datetime,
+        boy: bool,
+        due: datetime | None = None,
+        photo: bytes | None = None,
+        landscape_photo: bytes | None = None,
+        object_id: str | None = None,
+    ) -> Baby:
+        """Add a baby to the account, and apply it locally.
+
+        The app's new-baby screen asks for a ``name``, a ``birth`` date (aware), and whether it
+        is a ``boy``; ``due`` and ``photo`` are optional. It posts a ``Baby`` record, and the
+        returned baby's ``object_id`` is the ``baby_id`` for its records. A ``photo`` (JPEG
+        bytes) is uploaded first, as for ``edit_baby``.
+
+        A name another baby on the account has (ignoring case) raises ``SelectionExistsError``
+        with that baby's ID: the apps treat two babies of one name as a conflict and merge them.
+        Bad input raises ``ValueError``. Both happen before any request. ``object_id`` works as
+        for ``add_diaper``, and a retry of an add that landed uploads nothing again.
+        """
+        picture = check_jpeg(photo, "a baby's photo") if photo is not None else None
+        landscape = (
+            check_jpeg(landscape_photo, "a baby's landscape photo")
+            if landscape_photo is not None
+            else picture
+        )
+        if landscape_photo is not None and picture is None:
+            raise ValueError("give a photo with its landscape_photo")
+        picture_name = str(uuid.uuid4()).upper() if picture is not None else None
+
+        def resolve() -> Draft[Baby]:
+            draft = draft_baby(name, birth=birth, boy=boy, due=due, picture_name=picture_name)
+            wanted = name.strip().casefold()
+            for baby_id, baby in self.babies().items():
+                is_retry = (
+                    object_id is not None and self._resolve_id(object_id, (baby_id,)) is not None
+                )
+                same_name = isinstance(baby.name, str) and baby.name.strip().casefold() == wanted
+                if same_name and not is_retry:
+                    raise SelectionExistsError("baby", name.strip(), baby_id)
+            return draft
+
+        self._check_can_write(target)
+        resolve()
+        if object_id is not None:
+            held = self._resolve_id(object_id, self._created)
+            existing = self._records.get(held) if held is not None else None
+            if isinstance(existing, Baby):
+                return existing  # an earlier attempt of this add landed
+        if picture is not None and landscape is not None:
+            await target.upload_picture(f"{picture_name}.jpg", picture)
+            await target.upload_picture(f"{picture_name}_l.jpg", landscape)
+        return await self._add(target, None, resolve, object_id)
 
     async def edit_baby(
         self,
