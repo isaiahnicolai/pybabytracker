@@ -58,6 +58,7 @@ from .models import (
     Milestone,
     Nursing,
     OtherActivity,
+    OtherActivityDescription,
     OtherFeed,
     OtherFeedSelection,
     Pump,
@@ -693,7 +694,14 @@ def draft_activity(
     the app keeps in its local database.
     """
     _checked_activity_minutes(duration)
-    embedded = dict(selection)
+    # An iPhone-shaped type (typed) is embedded as the iPhone app embeds one: not new, and dated
+    # 1970, as every custom type in the iPhone's synced activities is. One of any other shape,
+    # such as an Android phone's, is embedded as it synced.
+    embedded = (
+        _embedded("OtherActivityDescription", selection)
+        if "BCObjectType" in selection
+        else dict(selection)
+    )
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherActivity:
@@ -885,6 +893,33 @@ def draft_other_feed(
         )
 
     return Draft(OtherFeed, build)
+
+
+# The longest name of an activity type added to the pick list, in characters.
+MAX_ACTIVITY_TYPE_NAME_LENGTH = 50
+
+
+def draft_activity_type(name: str) -> Draft[OtherActivityDescription]:
+    """A new activity type for the pick list, in the shape an iPhone's new food has with a
+    food's own ``bottle`` left out: ``BCObjectType``, ``objectID``, ``name``, ``newFlage``
+    "true", and ``timestamp``, with no record fields. That is also the copy the iPhone app
+    embeds in an activity of a custom type, apart from ``newFlage`` and ``timestamp``. The
+    name is written without surrounding spaces."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("an activity type's name must be text")
+    written = name.strip()
+    if len(written) > MAX_ACTIVITY_TYPE_NAME_LENGTH:
+        raise ValueError(
+            "an activity type's name can't be longer than "
+            f"{MAX_ACTIVITY_TYPE_NAME_LENGTH} characters"
+        )
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherActivityDescription:
+        return OtherActivityDescription(
+            object_id=object_id, name=written, new_flag="true", timestamp=timestamp
+        )
+
+    return Draft(OtherActivityDescription, build)
 
 
 # The longest name of a food added to the pick list, in characters.

@@ -197,7 +197,8 @@ class InvalidSelectionNameError(ValidationError, ValueError):
 class SelectionExistsError(ValidationError):
     """A new pick-list entry was refused because one of that name is already on the list.
 
-    ``what`` says which list ("food"); ``object_id`` is the existing entry's, to use instead.
+    ``what`` says which list ("food", "medicine", or "activity"); ``object_id`` is the existing
+    entry's, to use instead.
     """
 
     def __init__(self, what: str, name: str, object_id: str) -> None:

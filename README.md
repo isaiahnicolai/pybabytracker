@@ -137,6 +137,7 @@ key.
 | `add_vaccine(client, baby_id, vaccine, ...)` | `Vaccine` | `vaccine` is a name or ID from `vaccine_choices()` |
 | `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 | `add_activity(client, baby_id, activity, duration=0, ...)` | `OtherActivity` | tummy time, a bath, and so on; `activity` is a name or ID from `activity_choices()` |
+| `add_activity_type(client, name)` | `OtherActivityDescription` | a new activity type for the pick list, such as "Bath"; belongs to the account, so no `baby_id` |
 | `add_joy(client, baby_id, note="", pictures=(), ...)` | `Joy` | a moment kept with its note and photos, at least one of the two |
 | `add_growth(client, baby_id, weight=, length=, head=, ...)` | `Growth` | any of the three, each a `Measurement`, rounded to two decimals; weight in decimal `"lb"` (9 lb 4 oz is 9.25) or `"kg"`, length and head in one of `"in"` or `"cm"`; each must be in `GROWTH_RANGES` |
 | `add_temperature(client, baby_id, temperature, ...)` | `Temperature` | `Measurement(value, "F")` or `Measurement(value, "C")`, not converted and rounded to two decimals; must be in `TEMPERATURE_RANGES` |
@@ -166,7 +167,9 @@ key.
   like vaccines: the app's 5 built-ins (`BUILT_IN_ACTIVITIES`: Crawling, Cruising, Tummy Time, TV
   Time, Story Time) plus ones added in the app, `activity_choices()`, `find_activity`, and
   `UnknownActivityError`. The app has no bath screen: a bath is an activity of a type added in
-  the app, such as "Bath". An activity's `duration` is whole minutes, 0 when not timed.
+  the app, such as "Bath", or with `add_activity_type` (posted as an `OtherActivityDescription`
+  of its own, in the shape of a new food; that transaction is expected, not yet seen in synced
+  data). An activity's `duration` is whole minutes, 0 when not timed.
 - Foods work like activity types: the app's 9 built-ins (`BUILT_IN_FOODS`: Cereal, Veggies,
   Fruit, Meat, Finger Foods, Vitamins, and the drinks Water, Juice, and Milk) plus ones added in
   the app, `food_choices()`, `find_food`, and `UnknownFoodError`. A solid food's `unit` is free

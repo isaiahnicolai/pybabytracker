@@ -97,6 +97,7 @@ from .builders import (
     common_changes,
     diaper_changes,
     draft_activity,
+    draft_activity_type,
     draft_bottle,
     draft_diaper,
     draft_food,
@@ -169,6 +170,7 @@ from .models import (
     Nursing,
     NursingSession,
     OtherActivity,
+    OtherActivityDescription,
     OtherFeed,
     OtherFeedSelection,
     Pump,
@@ -207,6 +209,7 @@ _NOT_DELETABLE_FROM_OTHERS = (
     Baby,
     MedicationSelection,
     MilestoneSelection,
+    OtherActivityDescription,
     OtherFeedSelection,
     VaccineSelection,
     UnknownRecord,
@@ -1111,8 +1114,8 @@ class SyncEngine:
         for ``add_milestone``. The record embeds it as ``desc``. ``duration`` is whole minutes,
         0 (the default) when it wasn't timed, at most ``MAX_ACTIVITY_MINUTES``. Bad input raises
         the errors ``add_milestone`` does (``UnknownActivityError`` for an unknown type) or
-        ``ValueError`` for a bad duration, before any request; adding a new type to the pick
-        list isn't supported yet. The other arguments work as for ``add_diaper``.
+        ``ValueError`` for a bad duration, before any request; ``add_activity_type`` adds a
+        new type to the pick list. The other arguments work as for ``add_diaper``.
 
         ``pictures`` are photos, each a ``NewPicture(photo, thumbnail)`` of JPEG bytes, as both
         apps attach them when a record is added. ``add_activity``, ``add_milestone``, and
@@ -1190,16 +1193,47 @@ class SyncEngine:
         )
         return await self._add(target, baby_id, draft, object_id)
 
+    async def add_activity_type(
+        self, target: WriteTarget, name: str, *, object_id: str | None = None
+    ) -> OtherActivityDescription:
+        """Add an activity type, such as "Bath", to the account's pick list, and apply it
+        locally.
+
+        The type is posted as its own ``OtherActivityDescription``, as the apps post a new food
+        or medicine before the first record that names it, so log an activity with
+        ``add_activity`` and the returned record's ``object_id``. ``name`` is written without
+        surrounding spaces, at most ``MAX_ACTIVITY_TYPE_NAME_LENGTH`` characters. A name already
+        on the list (ignoring case, built-in or not) raises ``SelectionExistsError`` with that
+        type's ID, and a bad name ``ValueError``, before any request. The type belongs to the
+        account, not a baby. ``object_id`` works as for ``add_diaper``.
+        """
+
+        def resolve() -> Draft[OtherActivityDescription]:
+            draft = draft_activity_type(name)
+            wanted = name.strip().casefold()
+            for choice in self.activity_choices():
+                # A retry names the type that landed, whatever the case of its id.
+                is_retry = (
+                    object_id is not None
+                    and self._resolve_id(object_id, (choice.object_id,)) is not None
+                )
+                if choice.name.strip().casefold() == wanted and not is_retry:
+                    raise SelectionExistsError("activity", name.strip(), choice.object_id)
+            return draft
+
+        resolve()
+        return await self._add(target, None, resolve, object_id)
+
     def activity_choices(self) -> list[SelectionChoice]:
         """Every activity type a record can name: the app's built-ins in its order, then added
         ones, by name. Copies are chosen as for ``milestone_choices``. A type added in the app
-        syncs as its own ``OtherActivityDescription`` record (kept raw) and is embedded in each
-        activity of that type.
+        is embedded in each activity of that type, and one synced as its own
+        ``OtherActivityDescription`` record (as ``add_activity_type`` posts it) is offered too.
         """
         synced = [
             r.to_payload()
             for r in self._records.values()
-            if r.record_type == "OtherActivityDescription"
+            if isinstance(r, OtherActivityDescription)
         ]
         embedded = [
             embedded_copy(r, r.desc) for r in self._records.values() if isinstance(r, OtherActivity)
