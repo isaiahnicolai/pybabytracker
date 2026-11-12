@@ -108,6 +108,12 @@ class FakeSyncServer:
         self.picture_chunked = False
         # The account's seed zip; None answers with missing_seed_status.
         self.seed: bytes | None = None
+        # Whether the account has a sync group, and the groups being built: staging cookie ->
+        # what has been staged.
+        self.has_group = True
+        self.staging: dict[str, dict[str, Any]] = {}
+        # The status PUT /staging_account answers instead of finishing (None: finish).
+        self.finish_status: int | None = None
         self.missing_seed_status = 404
         # Answer the seed request with a redirect to this location.
         self.seed_redirect: str | None = None
@@ -152,6 +158,11 @@ class FakeSyncServer:
         app.router.add_post("/session", self._post_session)
         app.router.add_delete("/session", self._delete_session)
         app.router.add_post("/account/forgot_password", self._post_forgot_password)
+        app.router.add_post("/staging_account", self._post_staging)
+        app.router.add_post("/account_reset", self._post_staging)
+        app.router.add_post("/staging_account/seed", self._post_staged_file)
+        app.router.add_post("/staging_account/picture", self._post_staged_file)
+        app.router.add_put("/staging_account", self._put_staging)
         app.router.add_get("/account/device", self._get_devices)
         app.router.add_get("/account/transaction/{uuid}/{since}", self._get_transactions)
         app.router.add_post("/account/transaction", self._post_transaction)
@@ -205,6 +216,76 @@ class FakeSyncServer:
         response = self._json({"AccountID": self.account_id})
         response.set_cookie("PHPSESSID", token)
         return response
+
+    async def _post_staging(self, request: web.Request) -> web.Response:
+        """Start building a group: a new one (409 when the account has one) or a reset."""
+        await self._record(request)
+        if self.force_status is not None:
+            return web.Response(status=self.force_status, text="forced")
+        body = self.requests[-1].body
+        if body["EmailAddress"] != self.email or body["Password"] != self.password:
+            return web.Response(status=401, text="Unauthorized")
+        reset = request.path == "/account_reset"
+        if self.has_group and not reset:
+            return web.Response(status=409, text="")
+        token = secrets.token_hex(8)
+        self.staging[token] = {"seed": None, "pictures": {}, "device": body["Device"]}
+        response = web.Response(status=200, text="")
+        response.set_cookie("PHPSESSID", token)
+        return response
+
+    async def _post_staged_file(self, request: web.Request) -> web.Response:
+        """Take a seed or a picture for a group being built, framed exactly as the apps do."""
+        await self._record(request)
+        staged = self.staging.get(request.cookies.get("PHPSESSID", ""))
+        if staged is None:
+            return web.Response(status=401, text="Unauthorized")
+        for suffix, status in self.fail_paths.items():
+            if request.path.endswith(suffix):
+                return web.Response(status=status, text="forced")
+        body = self.requests[-1].body
+        assert isinstance(body, bytes)
+        is_seed = request.path.endswith("/seed")
+        boundary = (
+            "__BABY_TRACKER_BOUNDARY____SEED__" if is_seed else "__BABY_TRACKER_BOUNDARY____Photo__"
+        )
+        assert request.headers["Content-Type"] == f"multipart/form-data; boundary={boundary}"
+        head, _, rest = body.partition(b"\r\n\r\n")
+        lines = head.decode().split("\r\n")
+        assert lines[:2] == ["", f"--{boundary}"]
+        field, mime = ("seed", "application/zip") if is_seed else ("picture", "image/jpeg")
+        assert lines[3] == f"Content-Type: {mime}"
+        prefix = f'Content-Disposition: form-data; name="{field}"; filename="'
+        assert lines[2].startswith(prefix) and lines[2].endswith('"')
+        tail = f"\r\n--{boundary}--\r\n".encode()
+        assert rest.endswith(tail)
+        name, data = lines[2][len(prefix) : -1], rest[: -len(tail)]
+        if is_seed:
+            assert name == "seed.zip"
+            staged["seed"] = data
+        else:
+            staged["pictures"][name] = data
+        return web.Response(status=201, text="")
+
+    async def _put_staging(self, request: web.Request) -> web.Response:
+        """Finish a group: the staged seed and pictures replace everything the account had."""
+        await self._record(request)
+        token = request.cookies.get("PHPSESSID", "")
+        staged = self.staging.get(token)
+        if staged is None:
+            return web.Response(status=401, text="Unauthorized")
+        if self.finish_status is not None:
+            return web.Response(status=self.finish_status, text="forced")
+        if staged["seed"] is None:
+            return web.Response(status=424, text="")
+        del self.staging[token]
+        self.account_id += 1
+        self.has_group = True
+        self.devices.clear()
+        self.sessions.clear()
+        self.seed = staged["seed"]
+        self.pictures = dict(staged["pictures"])
+        return web.Response(status=200, text="")
 
     async def _post_forgot_password(self, request: web.Request) -> web.Response:
         """A password reset request, which needs no session: 200 for the account's address, and
