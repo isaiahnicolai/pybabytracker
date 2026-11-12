@@ -17,10 +17,12 @@ Rules:
   - An add or update from another device brings a deleted record back only with a strictly
     newer timestamp than the tombstone.
 
-- The apps' two repair operations, Relive (opcode 3) and Conflict (opcode 4), are recognized and
-  not applied. A Relive brings back a baby or pick-list entry whose delete a device refused
-  because records still use it; those records already keep it in ``babies()`` and the choice
-  lists. A Conflict pairs two babies or entries of one name; both stay.
+- The apps' two repair operations are recognized. A Relive (opcode 3) brings back a baby or
+  pick-list entry whose delete a device refused because records still use it; it isn't
+  applied, since those records already keep it in ``babies()`` and the choice lists. A
+  Conflict (opcode 4) pairs two babies or entries of one name, a winner and a loser: the
+  winner is stored, the loser's own record goes, and every record naming the loser names the
+  winner instead, including one that arrives later. ``merged_entries`` lists them.
 - A transaction that can't be decoded, has an unknown opcode, or has no ``objectID`` is
   skipped with a warning and never stops the sync. A record of an unknown type, or of a known
   type with values the models don't understand, is kept raw.
@@ -190,6 +192,27 @@ from .selections import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# The record types a Conflict can pair: a baby, or a pick-list entry. An activity type has no
+# model of its own, so it is named by its type string.
+_NAMED_TYPES = frozenset(
+    {
+        "Baby",
+        "MedicationSelection",
+        "MilestoneSelection",
+        "OtherActivityDescription",
+        "OtherFeedSelection",
+        "VaccineSelection",
+    }
+)
+# Where a record embeds the pick-list entry it names.
+_EMBEDDED_ENTRY_FIELDS = (
+    "medication_selection",
+    "milestone_type",
+    "vaccine_type",
+    "feed_type",
+    "desc",
+)
+
 STATE_VERSION = 4
 # How this library reads a seed. Raise it when a fix reads more out of seeds: state saved at an
 # older format reads the seed again (records merge idempotently).
@@ -318,6 +341,8 @@ class SyncEngine:
         self._created: set[str] = set()
         self._add_numbers: dict[str, int] = {}  # object_id -> number of this device's add
         # Objects this device posted an update to (a sleep's end, or photos added).
+        # Babies and pick-list entries a Conflict folded into another: loser (upper) -> winner.
+        self._merged: dict[str, str] = {}
         self._own_updates: set[str] = set()
         self._logged_unknown_types: set[str] = set()
         self._account_id: int | None = None
@@ -1507,18 +1532,14 @@ class SyncEngine:
 
     def _apply_one(self, device_uuid: str, transaction: RawTransaction) -> bool:
         where = f"device {device_uuid} number {transaction.sync_id}"
-        if transaction.op_code in (OP_RELIVE, OP_CONFLICT):
-            # The apps' repair operations. A Relive needs no change here: it is only posted for
-            # a baby or pick-list entry that records still use, and ``babies()`` and the choice
-            # lists are built from those records as well as from the entry's own record. A
-            # Conflict isn't merged: both entries stay, so a lookup by their shared name raises
-            # ``AmbiguousSelectionError`` naming both IDs.
-            _LOGGER.debug(
-                "Not applying %s (%s)",
-                "a Relive" if transaction.op_code == OP_RELIVE else "a Conflict",
-                where,
-            )
+        if transaction.op_code == OP_RELIVE:
+            # A Relive needs no change here: it is only posted for a baby or pick-list entry
+            # that records still use, and ``babies()`` and the choice lists are built from
+            # those records as well as from the entry's own record.
+            _LOGGER.debug("Not applying a Relive (%s)", where)
             return False
+        if transaction.op_code == OP_CONFLICT:
+            return self._apply_conflict(device_uuid, transaction, where)
         if transaction.op_code not in (OP_ADD, OP_UPDATE, OP_DELETE):
             _LOGGER.warning(
                 "Skipping transaction with unknown opcode %s (%s)", transaction.op_code, where
@@ -1557,7 +1578,86 @@ class SyncEngine:
                 self._add_numbers.pop(record.object_id, None)  # a newer delete rejected the add
         return True
 
+    def _apply_conflict(self, device_uuid: str, transaction: RawTransaction, where: str) -> bool:
+        """Fold a Conflict's loser into its winner, as the apps do: the winner is stored, the
+        loser's own record goes, and every record that names the loser names the winner
+        instead, now and when one arrives later. A Conflict that isn't two babies or two
+        pick-list entries of one kind is skipped with a warning."""
+        try:
+            payload = decode_transaction(transaction.transaction).to_payload()
+            winner_raw, loser_raw = payload.get("winner"), payload.get("loser")
+            if not isinstance(winner_raw, dict) or not isinstance(loser_raw, dict):
+                raise TransactionDecodeError("a Conflict needs a winner and a loser")
+            winner, loser = decode_payload(winner_raw), decode_payload(loser_raw)
+        except TransactionDecodeError as err:
+            _LOGGER.warning("Skipping undecodable Conflict (%s): %s", where, err)
+            return False
+        kind = winner.record_type
+        if kind != loser.record_type or kind not in _NAMED_TYPES:
+            _LOGGER.warning(
+                "Skipping a Conflict between a %s and a %s (%s)",
+                kind or "record",
+                loser.record_type or "record",
+                where,
+            )
+            return False
+        stamp = winner.timestamp.timestamp() if winner.timestamp is not None else 0.0
+        self._store(winner, _Version(stamp, _RANK_UPDATE, device_uuid, transaction.sync_id))
+        if winner.object_id.upper() == loser.object_id.upper():
+            return True  # one entry under two copies: nothing to fold
+        self._merged[loser.object_id.upper()] = winner.object_id
+        held = self._resolve_id(loser.object_id, self._records)
+        if held is not None:
+            del self._records[held]
+            del self._versions[held]
+            self._add_numbers.pop(held, None)
+        for object_id, record in list(self._records.items()):
+            repointed = self._repointed(record)
+            if repointed is not record:
+                self._records[object_id] = repointed
+        return True
+
+    def _winner_of(self, object_id: str) -> str | None:
+        """The entry that ``object_id`` was folded into by a Conflict, following a chain of
+        them, or ``None`` when it wasn't."""
+        current, seen = object_id, {object_id.upper()}
+        while (winner := self._merged.get(current.upper())) is not None:
+            if winner.upper() in seen:
+                break  # two Conflicts that each name the other as the winner
+            seen.add(winner.upper())
+            current = winner
+        return current if current.upper() != object_id.upper() else None
+
+    def _repointed(self, record: Record) -> Record:
+        """``record`` naming a Conflict's winner wherever it names a loser: its baby, and the
+        pick-list entry it embeds. The same record when it names none."""
+        if not self._merged:
+            return record
+        changes: dict[str, Any] = {}
+        if record.baby is not None and (winner := self._winner_of(record.baby.object_id)):
+            kept = self._records.get(self._resolve_id(winner, self._records) or winner)
+            changes["baby"] = (
+                kept if isinstance(kept, Baby) else replace(record.baby, object_id=winner)
+            )
+        for name in _EMBEDDED_ENTRY_FIELDS:
+            embedded = getattr(record, name, None)
+            if not isinstance(embedded, dict):
+                continue
+            named = embedded.get("objectID")
+            if isinstance(named, str) and (winner := self._winner_of(named)):
+                changes[name] = {**embedded, "objectID": winner}
+        return replace(record, **changes) if changes else record
+
+    def merged_entries(self) -> dict[str, str]:
+        """The babies and pick-list entries a Conflict folded into another: the loser's ID (in
+        upper case) to the winner's. A snapshot."""
+        return dict(self._merged)
+
     def _store(self, record: Record, version: _Version) -> None:
+        if self._merged:
+            if self._winner_of(record.object_id) is not None:
+                return  # an entry a Conflict folded away stays gone
+            record = self._repointed(record)
         object_id = record.object_id
         tombstone = self._tombstones.get(object_id)
         if tombstone is not None:
@@ -1631,6 +1731,7 @@ class SyncEngine:
             "seeded": self._seeded,
             "last_seen": dict(sorted(self._last_seen.items())),
             "account_id": self._account_id,
+            "merged": dict(sorted(self._merged.items())),
             "records": [
                 {"version": self._versions[i].to_dict(), "payload": r.to_payload()}
                 for i, r in sorted(self._records.items())
@@ -1681,6 +1782,7 @@ class SyncEngine:
             if str(i) in engine._created
         }
         engine._own_updates = {str(i) for i in data.get("own_updates", [])}
+        engine._merged = {str(k).upper(): str(v) for k, v in data.get("merged", {}).items()}
         account_id = data.get("account_id")
         engine._account_id = account_id if is_account_id(account_id) else None
         # State saved before seeds were read has none: the next sync reads it.
