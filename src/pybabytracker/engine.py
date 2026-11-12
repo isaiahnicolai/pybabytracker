@@ -120,6 +120,7 @@ from .builders import (
     other_feed_changes,
     picture_entry,
     pictured_payload,
+    pump_edit,
     resolve_sleep_end,
     sleep_changes,
     temperature_changes,
@@ -785,6 +786,52 @@ class SyncEngine:
         edit = Edit(_some({**activity_changes(duration), **common}))
         record = await self._edit(target, object_id, lambda record: edit, OtherActivity)
         assert isinstance(record, OtherActivity)
+        return record
+
+    async def edit_pump(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        amount: Volume | None = None,
+        left_volume: Volume | None = None,
+        right_volume: Volume | None = None,
+        left_minutes: int | None = None,
+        right_minutes: int | None = None,
+        finish_side: int | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Pump:
+        """Change a saved pump: its volumes, the minutes on a side, the side it is recorded
+        under, and its time, zone, and note as for ``edit_record``, whose rules it shares. Give
+        at least one. ``time`` is the start.
+
+        Give the total as ``amount``, or the volume of one or both sides, not both, as for
+        ``add_pump``. A new total drops the per-side volumes. With a side volume, the other
+        side keeps its saved volume (0 when it has none), both must be in one unit, and the
+        total becomes their sum. Minutes and the side not given are kept, and the pump must
+        still have a volume or a length.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+
+        def changes(record: Record) -> Edit:
+            assert isinstance(record, Pump)
+            own = pump_edit(
+                record,
+                amount=amount,
+                left_volume=left_volume,
+                right_volume=right_volume,
+                left_minutes=left_minutes,
+                right_minutes=right_minutes,
+                finish_side=finish_side,
+            )
+            return Edit(_some({**own.set, **common}), own.drop)
+
+        record = await self._edit(target, object_id, changes, Pump)
+        assert isinstance(record, Pump)
         return record
 
     async def edit_baby(

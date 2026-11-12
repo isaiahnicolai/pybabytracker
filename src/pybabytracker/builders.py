@@ -548,6 +548,74 @@ def activity_changes(duration: int | None) -> dict[str, Any]:
     return {} if duration is None else {"duration": _checked_activity_minutes(duration)}
 
 
+def pump_edit(
+    pump: Pump,
+    *,
+    amount: Volume | None,
+    left_volume: Volume | None,
+    right_volume: Volume | None,
+    left_minutes: int | None,
+    right_minutes: int | None,
+    finish_side: int | None,
+) -> Edit:
+    """A pump's volumes, minutes, and side, checked as for ``draft_pump``.
+
+    Give the total as ``amount``, or the volume of one or both sides, not both. A new total
+    drops the per-side amounts, like the app's own pump with only a total. With a side volume,
+    the other side keeps its saved volume (0 when it has none), both in one unit, and the total
+    becomes their sum. Minutes and the side not given are kept. The pump must still have a
+    volume or a length afterwards."""
+    if amount is not None and (left_volume is not None or right_volume is not None):
+        raise ValueError("give a pump's total volume or its side volumes, not both")
+    changes: dict[str, Any] = {}
+    drop: tuple[str, ...] = ()
+    if finish_side is not None:
+        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
+            raise ValueError(
+                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
+            )
+        changes["finishSide"] = finish_side
+    left = numeric_code(pump.left_duration) or 0
+    right = numeric_code(pump.right_duration) or 0
+    if left_minutes is not None:
+        left = changes["leftDuration"] = _minutes(left_minutes, "left_minutes")
+    if right_minutes is not None:
+        right = changes["rightDuration"] = _minutes(right_minutes, "right_minutes")
+    saved = pump.volume
+    total: int | float = saved.value if saved is not None else 0
+    if amount is not None:
+        total_v = _checked(amount, "amount")
+        total = total_v.value
+        if total <= 0:
+            raise ValueError("a pump's total volume must be more than zero")
+        changes["amount"] = _measure(total_v).to_payload()
+        drop = ("leftAmount", "rightAmount")
+    elif left_volume is not None or right_volume is not None:
+        left_v = (
+            _checked(left_volume, "left_volume") if left_volume is not None else pump.left_volume
+        )
+        right_v = (
+            _checked(right_volume, "right_volume")
+            if right_volume is not None
+            else pump.right_volume
+        )
+        units = {v.unit for v in (left_v, right_v) if v is not None}
+        if len(units) != 1:
+            raise ValueError("both sides of a pump must use the same unit")
+        unit = units.pop()
+        left_amount = left_v.value if left_v is not None else 0
+        right_amount = right_v.value if right_v is not None else 0
+        total = round(left_amount + right_amount, 6)
+        if total <= 0:
+            raise ValueError("a pump's total volume must be more than zero")
+        changes["amount"] = _measure(Volume(total, unit)).to_payload()
+        changes["leftAmount"] = _measure(Volume(left_amount, unit)).to_payload()
+        changes["rightAmount"] = _measure(Volume(right_amount, unit)).to_payload()
+    if total <= 0 and left + right == 0:
+        raise ValueError("a pump needs a volume for at least one side, or a length")
+    return Edit(changes, drop)
+
+
 def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str, Any]:
     """The update that edits a saved record, as the iPhone app posts it: the record as last
     saved (key order and unknown keys kept), with only the edited keys, ``newFlage`` false, and

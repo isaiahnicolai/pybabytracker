@@ -101,8 +101,9 @@ The engine posts as its own device (`device_uuid`, which must match the client's
 - `edit_diaper` (`status`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
   `right_minutes`, `finish_side`), `edit_sleep` (`start`, `end`), `edit_temperature`
   (`temperature`), `edit_growth` (`weight`, `length`, `head`), `edit_medication` (`amount`),
-  `edit_other_feed` (`amount`, `unit`), and `edit_activity` (`duration`) change a record's own
-  fields the same way, with the time, zone, and note in the same update, and with the checks of
+  `edit_other_feed` (`amount`, `unit`), `edit_activity` (`duration`), and `edit_pump` (`amount`
+  or `left_volume`/`right_volume`, `left_minutes`, `right_minutes`, `finish_side`) change a
+  record's own fields the same way, with the time, zone, and note in the same update, and with the checks of
   the matching `add_*`. A value not given is kept: a nursing's other side, and a sleep's end
   when its start moves (so it gets longer or shorter). When a nursing's minutes change, the keys
   an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
