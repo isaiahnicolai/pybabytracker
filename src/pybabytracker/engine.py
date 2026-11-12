@@ -95,6 +95,7 @@ from .builders import (
     baby_changes,
     bottle_changes,
     check_pictures,
+    check_running_start,
     common_changes,
     diaper_changes,
     draft_activity,
@@ -571,7 +572,13 @@ class SyncEngine:
         for each record type also change a record's own fields.
         """
         edit = Edit(common_changes(time=time, timezone_offset=timezone_offset, note=note))
-        return await self._edit(target, object_id, lambda record: edit)
+
+        def changes_for(record: Record) -> Edit:
+            if time is not None and isinstance(record, Sleep) and record.is_running:
+                check_running_start(time)
+            return edit
+
+        return await self._edit(target, object_id, changes_for)
 
     async def edit_diaper(
         self,
@@ -1072,7 +1079,8 @@ class SyncEngine:
 
         Returns the baby as updated; records added afterwards embed it. Without a photo,
         nothing is posted when the baby already has the values. Refused before any request:
-        ``ValueError`` for nothing to change or a bad value, ``UnknownBabyError`` for a baby
+        ``ValueError`` for nothing to change or a bad value, ``SelectionExistsError`` for a name
+        another baby has (as for ``add_baby``), ``UnknownBabyError`` for a baby
         never seen, and ``RecordNotFoundError`` for a baby that was deleted, or whose own
         record hasn't synced (only the copies its records carry, which may be partial).
         """
@@ -1089,14 +1097,20 @@ class SyncEngine:
             given = baby_changes(baby, name=name, birth=birth, due=due, boy=boy)
             if not given and picture is None:
                 raise ValueError("give something to change")
+            if "name" in given:
+                # As add_baby refuses it: the apps merge two babies of one name.
+                wanted = given["name"].casefold()
+                for other_id, other in self.babies().items():
+                    if other_id.upper() == baby.object_id.upper():
+                        continue
+                    if isinstance(other.name, str) and other.name.strip().casefold() == wanted:
+                        raise SelectionExistsError("baby", given["name"], other_id)
             return Edit(given)
 
         async with self._lock:
             self._check_can_write(target)
             baby_id = self._resolve_id(baby_id, self._records, self._tombstones) or baby_id
-            baby = self._saved_baby(baby_id)
-            if picture is None and changes(baby).already_in(baby.to_payload()):
-                return baby
+            changes(self._saved_baby(baby_id))  # bad input fails before any request
             # Every device's log: the update carries the whole baby as last saved.
             await self._catch_up(target)
             number = await self._prepare(target)
@@ -1141,11 +1155,10 @@ class SyncEngine:
         async with self._lock:
             self._check_can_write(target)
             object_id = self._resolve_id(object_id, self._records, self._tombstones) or object_id
-            record = self._editable(object_id, kinds)
-            if changes_for(record).already_in(record.to_payload()):
-                return record
+            changes_for(self._editable(object_id, kinds))  # bad input fails before any request
             # Every device's log, not just this one's: the update carries the whole record, so
-            # it must hold whatever another device saved since the last sync.
+            # it must hold whatever another device saved since the last sync. Whether the record
+            # already has the edit is asked only afterwards, for the same reason.
             await self._catch_up(target)
             number = await self._prepare(target)
             record = self._editable(object_id, kinds)  # as last saved, after the catch-up
@@ -2253,8 +2266,8 @@ class SyncEngine:
             1
             for record in self._records.values()
             if not isinstance(record, Baby)
-            and isinstance(record.baby_id, str)
-            and record.baby_id.upper() == wanted
+            and (owner := _owner_of(record)) is not None
+            and owner.upper() == wanted
         )
 
     def _refuse_baby_in_use(self, baby_id: str) -> None:
@@ -2525,7 +2538,13 @@ class SyncEngine:
         if device_uuid == self._device_uuid and transaction.op_code == OP_ADD:
             self._created.add(record.object_id)
             self._add_numbers[record.object_id] = transaction.sync_id
-        if device_uuid == self._device_uuid and transaction.op_code == OP_UPDATE:
+        if (
+            device_uuid == self._device_uuid
+            and transaction.op_code == OP_UPDATE
+            # An update that leaves a sleep running edited it (its note, its start): it isn't
+            # the end that end_sleep looks for.
+            and not (isinstance(record, Sleep) and record.is_running)
+        ):
             self._own_updates.add(record.object_id)
         stamp = record.timestamp.timestamp() if record.timestamp is not None else 0.0
         version = _Version(stamp, _OP_RANKS[transaction.op_code], device_uuid, transaction.sync_id)
@@ -2703,6 +2722,16 @@ def _wanted(value: object, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise InvalidSelectionNameError(what, value)
     return value
+
+
+def _owner_of(record: Record) -> str | None:
+    """The ID of the baby a record belongs to. A record of a type the library doesn't model is
+    kept raw, so its baby is read from the payload."""
+    if isinstance(record, UnknownRecord):
+        baby = record.raw.get("baby")
+        owner = baby.get("objectID") if isinstance(baby, Mapping) else record.raw.get("babyID")
+        return owner if isinstance(owner, str) else None
+    return record.baby_id
 
 
 def _some(changes: dict[str, Any]) -> dict[str, Any]:

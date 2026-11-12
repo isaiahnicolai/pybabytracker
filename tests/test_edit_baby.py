@@ -189,12 +189,11 @@ async def test_an_edit_that_changes_nothing_posts_nothing(
     seed(fake_server, iphone_baby())
     engine = await synced(client)
     first = await engine.edit_baby(client, BABY_ID, name="Renamed Baby", boy=False)
-    before = len(fake_server.requests)
 
     again = await engine.edit_baby(client, BABY_ID, name="Renamed Baby", boy=False)
 
     assert again == first
-    assert len(fake_server.requests) == before
+    assert len(posted(fake_server)) == 1  # the logs are read again, and nothing is posted
 
 
 async def test_the_edit_carries_what_another_device_saved_since_the_last_sync(

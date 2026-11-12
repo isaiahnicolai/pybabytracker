@@ -428,6 +428,16 @@ def nursing_edit(
     return Edit(changes, _NURSING_TIMER_KEYS)
 
 
+def check_running_start(start: datetime, now: datetime | None = None) -> None:
+    """Refuse a running sleep's start (aware) in the future, beyond a minute of clock skew, or
+    more than 24 hours ago: such a sleep could never be ended inside the cap."""
+    current = now if now is not None else datetime.now(UTC)
+    if start - current > START_SKEW:
+        raise ValueError("a sleep can't start in the future")
+    if current - start > MAX_SLEEP:
+        raise ValueError("a sleep can't have started more than 24 hours ago")
+
+
 def sleep_changes(sleep: Sleep, *, start: datetime | None, end: datetime | None) -> dict[str, Any]:
     """A sleep's start and end, checked as for ``draft_sleep``. The side not given is kept: a
     new start keeps the saved end (so the length changes), and a running sleep stays running
@@ -445,7 +455,9 @@ def sleep_changes(sleep: Sleep, *, start: datetime | None, end: datetime | None)
     saved_minutes = numeric_code(sleep.duration) or 0
     if end is None:
         if saved_minutes == 0 or sleep.time is None:
-            return changes  # running: only the start moves
+            if start is not None:
+                check_running_start(start)  # running: only the start moves, as a new one's
+            return changes
         end = sleep.time + timedelta(minutes=saved_minutes)
     if end <= begin:
         raise ValueError("end must be after start")
@@ -700,6 +712,8 @@ def removed_pictures(record: Record, wanted: Sequence[str] | None) -> Edit:
             if not found:
                 raise ValueError(f"record {record.object_id} has no picture {name!r}")
             targets.update(found)
+    if not targets:
+        return Edit({})
     changed = [
         {**entry, "deleted": True if isinstance(entry.get("deleted"), bool) else "true"}
         if i in targets
@@ -1440,10 +1454,7 @@ def draft_sleep_start(
     current = now if now is not None else datetime.now(UTC)
     begin = start if start is not None else current
     _offset(begin, "start")
-    if begin - current > START_SKEW:
-        raise ValueError("a sleep can't start in the future")
-    if current - begin > MAX_SLEEP:
-        raise ValueError("a sleep can't have started more than 24 hours ago")
+    check_running_start(begin, current)
     event, tz, text = _common(begin, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Sleep:

@@ -115,9 +115,10 @@ async def test_a_name_another_entry_of_the_list_has_is_refused_and_its_own_name_
     assert (raised.value.what, raised.value.object_id) == ("food", OTHER_FOOD["objectID"])
     with pytest.raises(SelectionExistsError):
         await engine.rename_entry(client, FOOD["objectID"], "Fruit")  # a built-in food
+    assert len(fake_server.requests) == before
     same = await engine.rename_entry(client, FOOD["objectID"], "Oatmeal")
     assert same.object_id == FOOD["objectID"]
-    assert len(fake_server.requests) == before
+    assert posted(fake_server) == []
 
 
 @pytest.mark.parametrize("name", ["", "   ", 7, None, "x" * 51])

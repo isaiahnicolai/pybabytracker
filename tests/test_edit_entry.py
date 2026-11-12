@@ -218,7 +218,6 @@ async def test_naming_the_entry_a_record_already_has_posts_nothing(
     plain = food(feedType=None, typeID=PEAR["objectID"].lower(), objectID=rid(36))
     seed(fake_server, dose(), food(), activity(), plain)
     engine = await synced(client)
-    before = len(fake_server.requests)
 
     assert (await engine.edit_medication(client, DOSE, medicine="Test Drops")).amount == 2
     await engine.edit_medication(client, DOSE, medicine=DROPS["objectID"].lower())
@@ -227,7 +226,6 @@ async def test_naming_the_entry_a_record_already_has_posts_nothing(
     # Named only by its plain ID, in another case: still the same food.
     await engine.edit_other_feed(client, rid(36), food="Pear")
 
-    assert len(fake_server.requests) == before
     assert posted(fake_server) == []
 
 
