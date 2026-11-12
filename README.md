@@ -98,6 +98,13 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   `timestamp` changed. It edits a baby's record or a pump, and posts nothing when the record
   already has the values, so a retry is safe. A sleep's or nursing's length is kept when its
   start moves.
+- `edit_diaper` (`status`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
+  `right_minutes`, `finish_side`), and `edit_sleep` (`start`, `end`) change a record's own
+  fields the same way, with the time, zone, and note in the same update, and with the checks of
+  the matching `add_*`. A value not given is kept: a nursing's other side, and a sleep's end
+  when its start moves (so it gets longer or shorter). When a nursing's minutes change, the keys
+  an iPhone's timer left on it are dropped, as the iPhone app drops them; an Android timer's
+  `NursingSession` keeps its minutes.
 - Save `to_dict()` after every write, including one that raised: a pending post lives only in
   that state. Use one device ID per running process; two processes writing as one device can
   collide on a number while `LastSyncID` lags.

@@ -88,9 +88,12 @@ from typing import Any, Protocol
 
 from .builders import (
     Draft,
+    Edit,
     NewPicture,
+    bottle_changes,
     check_pictures,
     common_changes,
+    diaper_changes,
     draft_activity,
     draft_bottle,
     draft_diaper,
@@ -109,9 +112,11 @@ from .builders import (
     draft_vaccine,
     edited_payload,
     ended_sleep_payload,
+    nursing_edit,
     picture_entry,
     pictured_payload,
     resolve_sleep_end,
+    sleep_changes,
 )
 from .client import Device, RawTransaction
 from .exceptions import (
@@ -155,6 +160,7 @@ from .models import (
     Milestone,
     MilestoneSelection,
     Nursing,
+    NursingSession,
     OtherActivity,
     OtherFeed,
     OtherFeedSelection,
@@ -523,42 +529,176 @@ class SyncEngine:
         It edits a baby's record or a pump. Refused before any request: ``ValueError`` for
         nothing to change or a bad value, ``RecordNotFoundError`` for a record never seen or
         deleted, and ``WrongRecordTypeError`` for a baby, a pick-list entry, or a record of a
-        type the library doesn't know. ``object_id`` can be in either case.
+        type the library doesn't know. ``object_id`` can be in either case. ``edit_diaper``,
+        ``edit_bottle``, ``edit_nursing``, and ``edit_sleep`` also change a record's own fields.
         """
-        changes = common_changes(time=time, timezone_offset=timezone_offset, note=note)
-        return await self._edit(target, object_id, changes)
+        edit = Edit(common_changes(time=time, timezone_offset=timezone_offset, note=note))
+        return await self._edit(target, object_id, lambda record: edit)
+
+    async def edit_diaper(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        status: int | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Diaper:
+        """Change a saved diaper: its ``status`` (``DIAPER_WET``, ``DIAPER_DIRTY``, or
+        ``DIAPER_MIXED``), and its time, zone, and note as for ``edit_record``, whose rules it
+        shares. Give at least one. A record that isn't a diaper raises ``WrongRecordTypeError``.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**diaper_changes(status), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, Diaper)
+        assert isinstance(record, Diaper)
+        return record
+
+    async def edit_bottle(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        volume: Volume | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Formula | Pumped:
+        """Change a saved formula or pumped-milk bottle: its ``volume`` (more than zero, as for
+        ``add_formula``), and its time, zone, and note as for ``edit_record``, whose rules it
+        shares. Give at least one. Formula can't become pumped milk or the reverse: they are
+        different record types, so delete the bottle and add the other. A record that isn't a
+        bottle raises ``WrongRecordTypeError``.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+        edit = Edit(_some({**bottle_changes(volume), **common}))
+        record = await self._edit(target, object_id, lambda record: edit, Formula, Pumped)
+        assert isinstance(record, Formula | Pumped)
+        return record
+
+    async def edit_nursing(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        left_minutes: int | None = None,
+        right_minutes: int | None = None,
+        finish_side: int | None = None,
+        time: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Nursing:
+        """Change a saved nursing: the minutes on a side (a side not given keeps its own), the
+        side it is recorded under, and its time, zone, and note as for ``edit_record``, whose
+        rules it shares. Give at least one. ``time`` is the start.
+
+        The checks are ``add_nursing``'s: whole minutes, at most ``MAX_MINUTES_PER_SIDE`` a
+        side, and at least a minute in all. When the minutes change, the keys an iPhone's timer
+        left on the record are dropped, as the iPhone app drops them. The minutes of an
+        Android timer's ``NursingSession`` can't be changed (``WrongRecordTypeError``): it
+        carries the timer's own timestamps, and how the app edits one hasn't been seen. Its
+        time, zone, and note can.
+        """
+        common = common_changes(
+            time=time, timezone_offset=timezone_offset, note=note, required=False
+        )
+
+        def changes(record: Record) -> Edit:
+            assert isinstance(record, Nursing)
+            own = nursing_edit(
+                record,
+                left_minutes=left_minutes,
+                right_minutes=right_minutes,
+                finish_side=finish_side,
+            )
+            if own.drop and isinstance(record, NursingSession):
+                raise WrongRecordTypeError(
+                    f"record {record.object_id} is a NursingSession, whose minutes come from "
+                    "its timer and can't be edited"
+                )
+            return Edit(_some({**own.set, **common}), own.drop)
+
+        record = await self._edit(target, object_id, changes, Nursing)
+        assert isinstance(record, Nursing)
+        return record
+
+    async def edit_sleep(
+        self,
+        target: WriteTarget,
+        object_id: str,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        timezone_offset: int | None = None,
+        note: str | None = None,
+    ) -> Sleep:
+        """Change a saved sleep: its ``start`` and ``end`` (aware), and its zone and note as for
+        ``edit_record``, whose rules it shares. Give at least one.
+
+        The one not given is kept, so a new ``start`` keeps the saved end and the sleep gets
+        longer or shorter; ``edit_record`` with a ``time`` moves the whole sleep instead. A
+        running sleep stays running when only its start moves, and an ``end`` finishes it. The
+        checks are ``add_sleep``'s: the end after the start, at most 24 hours, and the length
+        in whole minutes, rounded half up and at least 1.
+        """
+        common = common_changes(
+            time=None, timezone_offset=timezone_offset, note=note, required=False
+        )
+
+        def changes(record: Record) -> Edit:
+            assert isinstance(record, Sleep)
+            return Edit(_some({**sleep_changes(record, start=start, end=end), **common}))
+
+        record = await self._edit(target, object_id, changes, Sleep)
+        assert isinstance(record, Sleep)
+        return record
 
     async def _edit(
-        self, target: WriteTarget, object_id: str, changes: Mapping[str, Any]
+        self,
+        target: WriteTarget,
+        object_id: str,
+        changes_for: Callable[[Record], Edit],
+        *kinds: type[Record],
     ) -> Record:
         """The shared path of an edit: check, catch up, and post the record as last saved with
-        ``changes`` applied. Nothing is posted when the record already has them."""
+        the edit applied. ``changes_for`` gives the edit for the saved record and raises for bad
+        input; ``kinds`` are the record types it applies to (any baby's record or pump when
+        empty). Nothing is posted when the record already has the edit."""
         async with self._lock:
             self._check_can_write(target)
             object_id = self._resolve_id(object_id, self._records, self._tombstones) or object_id
-            record = self._editable(object_id)
-            if _already_has(record, changes):
+            record = self._editable(object_id, kinds)
+            if changes_for(record).already_in(record.to_payload()):
                 return record
             # Every device's log, not just this one's: the update carries the whole record, so
             # it must hold whatever another device saved since the last sync.
             await self._catch_up(target)
             number = await self._prepare(target)
-            record = self._editable(object_id)  # as last saved, after the catch-up
-            if _already_has(record, changes):
+            record = self._editable(object_id, kinds)  # as last saved, after the catch-up
+            edit = changes_for(record)
+            if edit.already_in(record.to_payload()):
                 return record
-            updated = decode_payload(edited_payload(record, changes, _update_stamp(record)))
+            updated = decode_payload(edited_payload(record, edit, _update_stamp(record)))
             await self._send(target, number, OP_UPDATE, encode_transaction(updated))
             return updated
 
-    def _editable(self, object_id: str) -> Record:
-        """The baby's record or pump ``object_id`` names, or raise why it can't be edited."""
+    def _editable(self, object_id: str, kinds: tuple[type[Record], ...] = ()) -> Record:
+        """The record ``object_id`` names, or raise why it can't be edited: one of ``kinds``, or
+        any baby's record or pump when there are none."""
+        wanted = " or ".join(kind.object_type for kind in kinds) or "baby's record or a pump"
         if object_id in self.babies():
-            raise WrongRecordTypeError(f"record {object_id} is a Baby, not a baby's record")
+            raise WrongRecordTypeError(f"record {object_id} is a Baby, not a {wanted}")
         record = self._saved_record(object_id)
-        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS):
+        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS) or (
+            kinds and not isinstance(record, kinds)
+        ):
             raise WrongRecordTypeError(
-                f"record {object_id} is a {record.record_type or 'record'}, "
-                "not a baby's record or a pump"
+                f"record {object_id} is a {record.record_type or 'record'}, not a {wanted}"
             )
         return record
 
@@ -1820,10 +1960,11 @@ def _wanted(value: object, what: str) -> str:
     return value
 
 
-def _already_has(record: Record, changes: Mapping[str, Any]) -> bool:
-    """Whether the saved record already holds every edited key with its new value."""
-    payload = record.to_payload()
-    return all(key in payload and payload[key] == value for key, value in changes.items())
+def _some(changes: dict[str, Any]) -> dict[str, Any]:
+    """``changes``, or ``ValueError`` when an edit was given nothing to change."""
+    if not changes:
+        raise ValueError("give something to change")
+    return changes
 
 
 def _update_stamp(record: Record) -> datetime:
