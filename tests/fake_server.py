@@ -50,6 +50,8 @@ class FakeSyncServer:
         # Session cookie -> the device that signed in with it.
         self.sessions: dict[str, tuple[str, str, str]] = {}
         self.requests: list[RecordedRequest] = []
+        # How many password reset emails the service would have sent.
+        self.reset_emails = 0
         # Status to return from the data endpoints instead of real data.
         self.force_status: int | None = None
         # Reject every data call with 401, even with a valid session.
@@ -148,6 +150,8 @@ class FakeSyncServer:
     def app(self) -> web.Application:
         app = web.Application()
         app.router.add_post("/session", self._post_session)
+        app.router.add_delete("/session", self._delete_session)
+        app.router.add_post("/account/forgot_password", self._post_forgot_password)
         app.router.add_get("/account/device", self._get_devices)
         app.router.add_get("/account/transaction/{uuid}/{since}", self._get_transactions)
         app.router.add_post("/account/transaction", self._post_transaction)
@@ -201,6 +205,31 @@ class FakeSyncServer:
         response = self._json({"AccountID": self.account_id})
         response.set_cookie("PHPSESSID", token)
         return response
+
+    async def _post_forgot_password(self, request: web.Request) -> web.Response:
+        """A password reset request, which needs no session: 200 for the account's address, and
+        400 for any other, as the Android app reads the service's answers."""
+        await self._record(request)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.force_status is not None:
+            return web.Response(status=self.force_status, text="forced")
+        if self.requests[-1].body["EmailAddress"] != self.email:
+            return web.Response(status=400, text="")
+        self.reset_emails += 1
+        return web.Response(status=200, text="")
+
+    async def _delete_session(self, request: web.Request) -> web.Response:
+        """End the caller's session, as the live service does: 200 with an empty body, or 401
+        "Unauthorized" when there is no such session (seen 2026-11-12)."""
+        await self._record(request)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.force_status is not None:
+            return web.Response(status=self.force_status, text="forced")
+        if self.sessions.pop(request.cookies.get("PHPSESSID", ""), None) is None:
+            return web.Response(status=401, text="Unauthorized")
+        return web.Response(status=200, text="")
 
     async def _guard(self, request: web.Request) -> web.Response | None:
         await self._record(request)
