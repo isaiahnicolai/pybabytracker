@@ -7,6 +7,7 @@ from .builders import (
     MAX_FOOD_NAME_LENGTH,
     MAX_OTHER_FEED_AMOUNT,
     TEMPERATURE_RANGES,
+    NewPicture,
 )
 from .client import BabyTrackerClient, Device, RawTransaction
 from .engine import ApplyResult, SyncEngine, SyncResult, SyncSource
@@ -51,6 +52,7 @@ from .models import (
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
+    MAX_PICTURE_BYTES,
     MEDIA_PHOTO,
     MEDIA_VIDEO,
     OP_ADD,
@@ -123,6 +125,7 @@ __all__ = [
     "MAX_ACTIVITY_MINUTES",
     "MAX_FOOD_NAME_LENGTH",
     "MAX_OTHER_FEED_AMOUNT",
+    "MAX_PICTURE_BYTES",
     "MEDIA_PHOTO",
     "MEDIA_VIDEO",
     "Picture",
@@ -166,6 +169,7 @@ __all__ = [
     "Milestone",
     "MilestoneSelection",
     "MinutesTooLongError",
+    "NewPicture",
     "NoResponseError",
     "NoUsualDoseError",
     "NotOwnRecordError",

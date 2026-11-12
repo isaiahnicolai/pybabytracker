@@ -25,16 +25,17 @@ Conventions:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from .exceptions import NoUsualDoseError
 from .models import (
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
+    MEDIA_PHOTO,
     SIDE_LEFT,
     SIDE_NONE,
     SIDE_RIGHT,
@@ -50,6 +51,7 @@ from .models import (
     Diaper,
     Formula,
     Growth,
+    Joy,
     Measurement,
     Medication,
     Milestone,
@@ -66,6 +68,7 @@ from .models import (
     Volume,
     VolumeMeasure,
     _selection_name,
+    check_jpeg,
 )
 from .models import _number as _plain_number
 from .times import format_time
@@ -177,6 +180,77 @@ def _base(
     if baby is not None:
         common["baby"] = baby
     return common
+
+
+class NewPicture(NamedTuple):
+    """A photo to attach to a new record: the photo and its thumbnail, each the bytes of a JPEG.
+
+    Both apps upload a thumbnail of their own making with every photo, and other devices show it
+    in lists, so the caller supplies one (any smaller JPEG of the same photo).
+    """
+
+    photo: bytes
+    thumbnail: bytes
+
+
+def check_pictures(pictures: object) -> tuple[NewPicture, ...]:
+    """``pictures`` as a tuple, or ``ValueError`` unless it is a sequence of ``NewPicture``s whose
+    photo and thumbnail are each a JPEG of at most ``MAX_PICTURE_BYTES``."""
+    if isinstance(pictures, str | bytes | bytearray | NewPicture) or not isinstance(
+        pictures, Sequence
+    ):
+        raise ValueError("pictures must be a list of NewPicture(photo, thumbnail)")
+    checked = []
+    for picture in pictures:
+        if not isinstance(picture, NewPicture):
+            raise ValueError("each picture must be a NewPicture(photo, thumbnail)")
+        photo = check_jpeg(picture.photo, "a picture's photo")
+        checked.append(NewPicture(photo, check_jpeg(picture.thumbnail, "a picture's thumbnail")))
+    return tuple(checked)
+
+
+def picture_entry(file_name: str, record_id: str) -> dict[str, Any]:
+    """One ``pictureNote`` entry, as the iPhone app writes it for a photo added with a record.
+    ``objectID`` and ``fileName`` are the same name, and the files are that name plus ".jpg" and
+    plus "__thumbnail.jpg"."""
+    return {
+        "activityID": record_id,
+        "BCObjectType": "Picture",
+        "mediaType": MEDIA_PHOTO,
+        "fileName": file_name,
+        "deleted": "false",
+        "newFlage": "true",
+        "timestamp": "1970-01-01 00:00:00 +0000",
+        "objectID": file_name,
+    }
+
+
+def draft_joy(*, time: datetime | None, timezone_offset: int | None, note: str) -> Draft[Joy]:
+    """A joy: a moment kept with its note and photos. It has no fields of its own; both apps
+    send only the ones every record carries (captured 2026-11-11 from an iPhone and an Android
+    phone, each with a photo)."""
+    event, tz, text = _common(time, timezone_offset, note)
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Joy:
+        return Joy(**_base(object_id, baby, timestamp, event, tz, text))
+
+    return Draft(Joy, build)
+
+
+def pictured_payload(
+    record: Record, entries: list[dict[str, Any]], timestamp: datetime
+) -> dict[str, Any]:
+    """The update that adds photos to a saved record, as both apps post it when a photo is added
+    while editing: the record as last saved (key order and unknown keys kept), with only
+    ``pictureNote`` (its entries, then the new ones), ``newFlage`` false, and ``timestamp``
+    changed. ``newFlage`` keeps its stored type: the iPhone app writes the string "false", and
+    Android's edit writes a JSON ``false`` into a record that holds a bool."""
+    payload = record.to_payload()
+    existing = payload.get("pictureNote")
+    payload["pictureNote"] = [*(existing if isinstance(existing, list) else []), *entries]
+    payload["newFlage"] = False if isinstance(payload.get("newFlage"), bool) else "false"
+    payload["timestamp"] = format_time(timestamp.astimezone(UTC))
+    return payload
 
 
 def draft_diaper(
