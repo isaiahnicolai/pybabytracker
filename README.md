@@ -90,8 +90,13 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   `RecordNotFoundError` if one is already deleted. Like the app, the delete sends the record as
   last saved with only `newFlage` set to `"false"`; its timestamp is not bumped.
   With `any_device=True` it also deletes a record another device added, as the apps delete each
-  other's records, with the same payload: a baby's records and pumps, but not a baby or a
-  pick-list entry (`WrongRecordTypeError`), which the apps refuse to delete while in use.
+  other's records, with the same payload: a baby's records, pumps, and pick-list entries, but
+  not a baby (`WrongRecordTypeError`). A pick-list entry another device added raises
+  `EntryInUseError` while a record still names it (`entry_users(object_id)` counts them), since
+  the apps refuse that delete and post the entry back.
+- `rename_entry(client, object_id, name)` renames a food, medicine, milestone, vaccine, or
+  activity type that has a record of its own, with an update of that record (expected, not yet
+  seen in synced data). A name another entry of the list has raises `SelectionExistsError`.
 - `edit_record(client, object_id, time=, timezone_offset=, note=)` changes a saved record's
   time or note, whichever device made it, as the apps do when a record is edited: an update
   (opcode 1) carrying the record as last saved with only those keys, `newFlage` false, and

@@ -162,7 +162,7 @@ async def test_the_longest_name_is_allowed_and_a_retry_posts_nothing_more(
     assert len(posted(fake_server)) == 1
 
 
-async def test_its_own_type_can_be_deleted_and_another_devices_cant(
+async def test_its_own_type_can_be_deleted_and_another_devices_cant_be_edited_as_a_record(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
     theirs = {**IPHONE_EMBEDDED, "newFlage": "true", "timestamp": "2026-11-11 20:36:00 +0000"}
@@ -171,8 +171,6 @@ async def test_its_own_type_can_be_deleted_and_another_devices_cant(
     assert isinstance(engine.records[theirs["objectID"]], OtherActivityDescription)
     kind = await engine.add_activity_type(client, "Bath")
 
-    with pytest.raises(WrongRecordTypeError):
-        await engine.delete_record(client, theirs["objectID"], any_device=True)
     with pytest.raises(WrongRecordTypeError):
         await engine.edit_record(client, theirs["objectID"], note="Edited")
     await engine.delete_record(client, kind.object_id)

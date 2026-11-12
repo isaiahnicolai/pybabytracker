@@ -208,6 +208,20 @@ class SelectionExistsError(ValidationError):
         self.object_id = object_id
 
 
+class EntryInUseError(ValidationError):
+    """A pick-list entry can't be deleted because records still name it.
+
+    The apps refuse such a delete from another device and post the entry back. ``what`` says
+    which list, ``object_id`` is the entry's, and ``users`` counts the records that name it.
+    """
+
+    def __init__(self, what: str, object_id: str, users: int) -> None:
+        super().__init__(f"{what} {object_id} is still named by {users} record(s)")
+        self.what = what
+        self.object_id = object_id
+        self.users = users
+
+
 class AmbiguousSelectionError(ValidationError):
     """A name matches more than one entry of a pick list, so it can't say which is meant.
 

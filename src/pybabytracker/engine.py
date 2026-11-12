@@ -90,6 +90,7 @@ from .builders import (
     Draft,
     Edit,
     NewPicture,
+    _checked_entry_name,
     activity_changes,
     baby_changes,
     bottle_changes,
@@ -136,6 +137,7 @@ from .exceptions import (
     AuthenticationError,
     BabyTrackerError,
     DownloadRefusedError,
+    EntryInUseError,
     InvalidSelectionNameError,
     NoResponseError,
     NotOwnRecordError,
@@ -210,6 +212,14 @@ _LOGGER = logging.getLogger(__name__)
 # What ``delete_record`` won't delete for another device, and ``edit_record`` won't edit: the
 # apps refuse to delete a baby or a pick-list entry that is still in use, they aren't records
 # with a time and a note, and an unknown type can't be checked.
+# The pick lists' own record types. An entry can be renamed, and deleted once no record names it.
+_PICK_LIST_TYPES = (
+    MedicationSelection,
+    MilestoneSelection,
+    OtherActivityDescription,
+    OtherFeedSelection,
+    VaccineSelection,
+)
 _NOT_DELETABLE_FROM_OTHERS = (
     Baby,
     MedicationSelection,
@@ -1022,13 +1032,41 @@ class SyncEngine:
         if object_id in self.babies():
             raise WrongRecordTypeError(f"record {object_id} is a Baby, not a {wanted}")
         record = self._saved_record(object_id)
-        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS) or (
-            kinds and not isinstance(record, kinds)
-        ):
+        if kinds:
+            refused = not isinstance(record, kinds)
+        else:
+            refused = isinstance(record, _NOT_DELETABLE_FROM_OTHERS)
+        if refused:
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, not a {wanted}"
             )
         return record
+
+    async def rename_entry(self, target: WriteTarget, object_id: str, name: str) -> Record:
+        """Rename a pick-list entry (a food, a medicine, a milestone, a vaccine, or an activity
+        type), whichever device added it: post an update (opcode 1) of the entry's own record
+        with only ``name``, ``newFlage`` false, and ``timestamp`` changed, as for
+        ``edit_record``.
+
+        The entry must have a record of its own: one added in an app since the account's seed,
+        or with an ``add_*`` method here. A built-in entry, and one known only from the copies
+        records embed, has none (``RecordNotFoundError``). ``name`` is written without
+        surrounding spaces, at most ``MAX_PICK_LIST_NAME_LENGTH`` characters. A name another
+        entry of the same list has (ignoring case) raises ``SelectionExistsError``. Records
+        that already name the entry keep the copy they embed, with the old name; the apps show
+        the entry's current name.
+        """
+        written = _checked_entry_name(name, "pick-list entry")
+
+        def changes(record: Record) -> Edit:
+            what, choices = self._entry_list(record)
+            for choice in choices:
+                same = self._resolve_id(choice.object_id, (record.object_id,)) is not None
+                if choice.name.strip().casefold() == written.casefold() and not same:
+                    raise SelectionExistsError(what, written, choice.object_id)
+            return Edit({"name": written})
+
+        return await self._edit(target, object_id, changes, *_PICK_LIST_TYPES)
 
     async def remove_pictures(
         self, target: WriteTarget, object_id: str, pictures: Sequence[str] | None = None
@@ -1931,10 +1969,15 @@ class SyncEngine:
 
         With ``any_device`` true, a record another device created can be deleted too, as the
         apps delete each other's records (and this library's), with the same payload. That
-        covers a baby's records and pumps. A baby or a pick-list entry another device created
-        raises ``WrongRecordTypeError``, since the apps refuse to delete one that is still in
-        use; so does a record of a type the library doesn't know. A record never seen, or
-        already deleted, raises ``RecordNotFoundError``.
+        covers a baby's records, pumps, and pick-list entries. A baby another device created
+        raises ``WrongRecordTypeError``, and so does a record of a type the library doesn't
+        know. A record never seen, or already deleted, raises ``RecordNotFoundError``.
+
+        A pick-list entry another device added (a food, a medicine, a milestone, a vaccine, an
+        activity type) raises ``EntryInUseError`` while any record known from sync still names
+        it: the apps refuse such a delete from another device and post the entry back.
+        ``entry_users`` counts those records. This device's own entry is deleted as before,
+        in use or not.
         """
         async with self._lock:
             self._check_can_write(target)
@@ -1945,7 +1988,7 @@ class SyncEngine:
             if object_id not in self._created:
                 if not any_device:
                     raise NotOwnRecordError(f"record {object_id} wasn't created by this device")
-                self._deletable(object_id)
+                self._refuse_entry_in_use(self._deletable(object_id))
                 # Every device's log, not just this one's: the delete carries the whole record,
                 # so it must hold whatever another device saved since the last sync.
                 await self._catch_up(target)
@@ -1960,6 +2003,8 @@ class SyncEngine:
             )
             if record is None:
                 raise RecordNotFoundError(f"record {object_id} is already deleted")
+            if object_id not in self._created:
+                self._refuse_entry_in_use(record)
             payload = record.to_payload()
             payload["newFlage"] = "false"
             await self._send(target, number, OP_DELETE, encode_transaction(decode_payload(payload)))
@@ -1971,12 +2016,55 @@ class SyncEngine:
                 f"record {object_id} is a Baby, which only the device that created it can delete"
             )
         record = self._saved_record(object_id)
-        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS):
+        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS) and not isinstance(
+            record, _PICK_LIST_TYPES
+        ):
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, which only the "
                 "device that created it can delete"
             )
         return record
+
+    def _entry_list(self, entry: Record) -> tuple[str, list[SelectionChoice]]:
+        """The name of the pick list ``entry`` is on, and that list's choices."""
+        if isinstance(entry, MedicationSelection):
+            return "medicine", self.medicine_choices()
+        if isinstance(entry, MilestoneSelection):
+            return "milestone", self.milestone_choices()
+        if isinstance(entry, VaccineSelection):
+            return "vaccine", self.vaccine_choices()
+        if isinstance(entry, OtherFeedSelection):
+            return "food", self.food_choices()
+        return "activity", self.activity_choices()
+
+    def entry_users(self, object_id: str) -> int:
+        """How many records known from sync name the pick-list entry ``object_id``: doses of a
+        medicine, solid foods of a food, and so on. The id matches whatever its case."""
+        wanted = object_id.upper()
+        count = 0
+        for record in self._records.values():
+            embedded: object = None
+            if isinstance(record, Medication):
+                embedded = record.medication_selection
+            elif isinstance(record, Milestone):
+                embedded = record.milestone_type
+            elif isinstance(record, Vaccine):
+                embedded = record.vaccine_type
+            elif isinstance(record, OtherFeed):
+                embedded = record.feed_type
+            elif isinstance(record, OtherActivity):
+                embedded = record.desc
+            named = embedded.get("objectID") if isinstance(embedded, Mapping) else None
+            if isinstance(named, str) and named.upper() == wanted:
+                count += 1
+        return count
+
+    def _refuse_entry_in_use(self, record: Record | None) -> None:
+        """Raise ``EntryInUseError`` when ``record`` is a pick-list entry records still name."""
+        if isinstance(record, _PICK_LIST_TYPES):
+            users = self.entry_users(record.object_id)
+            if users:
+                raise EntryInUseError(self._entry_list(record)[0], record.object_id, users)
 
     def _check_can_write(self, target: WriteTarget) -> None:
         if self._device_uuid is None:
