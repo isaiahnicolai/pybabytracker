@@ -201,6 +201,7 @@ from .selections import (
     BUILT_IN_MILESTONES,
     BUILT_IN_VACCINES,
     SelectionChoice,
+    choice_from_selection,
     embedded_copy,
     find_choice,
     merged_choices,
@@ -2048,6 +2049,43 @@ class SyncEngine:
         if isinstance(entry, OtherFeedSelection):
             return "food", self.food_choices()
         return "activity", self.activity_choices()
+
+    def _named_entry(self, record: Record) -> tuple[list[SelectionChoice], object, object] | None:
+        """For a record that names a pick-list entry: that list's choices, the copy the record
+        embeds, and the plain ID a seed row keeps instead. ``None`` for any other record."""
+        if isinstance(record, Medication):
+            return self.medicine_choices(), record.medication_selection, record.extra.get("medID")
+        if isinstance(record, Milestone):
+            return self.milestone_choices(), record.milestone_type, record.milestone_selection_id
+        if isinstance(record, Vaccine):
+            return self.vaccine_choices(), record.vaccine_type, record.vacc_id
+        if isinstance(record, OtherFeed):
+            return self.food_choices(), record.feed_type, record.type_id
+        if isinstance(record, OtherActivity):
+            return self.activity_choices(), record.desc, record.desc_id
+        return None
+
+    def entry_of(self, record: Record) -> SelectionChoice | None:
+        """The pick-list entry a record names: a dose's medicine, a solid food's food, an
+        activity's type, a milestone, or a vaccine. ``None`` for a record that names none, or
+        names one nothing is known about.
+
+        The entry is the list's current one with that ID, so it has the entry's name now even
+        when the record embeds an older copy (after ``rename_entry``), and it is found for a
+        record that only carries the ID. A seed row whose entry the seed doesn't hold comes out
+        that way, with no ``food_name``; the entry is still known when another record embeds
+        it. Failing that, the copy the record embeds is returned.
+        """
+        named = self._named_entry(record)
+        if named is None:
+            return None
+        choices, embedded, plain = named
+        ids = [embedded.get("objectID") if isinstance(embedded, Mapping) else None, plain]
+        wanted = {i.upper() for i in ids if isinstance(i, str) and i}
+        for choice in choices:
+            if choice.object_id.upper() in wanted:
+                return choice
+        return choice_from_selection(embedded)
 
     def entry_users(self, object_id: str) -> int:
         """How many records known from sync name the pick-list entry ``object_id``: doses of a
