@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 from types import TracebackType
@@ -22,10 +22,8 @@ from .exceptions import (
     AuthenticationError,
     BabyTrackerConnectionError,
     DownloadRefusedError,
-    GroupExistsError,
     NoResponseError,
     ProtocolError,
-    UnknownAccountError,
 )
 from .models import MAX_PICTURE_BYTES, check_jpeg, is_account_id, is_plain_file_name
 
@@ -37,9 +35,6 @@ USER_AGENT = f"pybabytracker/{__version__}"
 MAX_SEED_BYTES = 64 * 1024 * 1024
 # The multipart boundary the apps use for a picture upload.
 _PICTURE_BOUNDARY = "__BABY_TRACKER_BOUNDARY____Photo__"
-# The multipart boundary the apps use for a seed upload, and how a zip file starts.
-_SEED_BOUNDARY = "__BABY_TRACKER_BOUNDARY____SEED__"
-_ZIP_START = b"PK\x03\x04"
 # A seed can be large, so it gets longer than other requests, as long as data keeps coming.
 SEED_TIMEOUT = 600.0
 
@@ -145,22 +140,22 @@ class BabyTrackerClient:
         async with self._sign_in_lock:
             return await self._sign_in()
 
-    def _user_info(self) -> dict[str, Any]:
-        """The body the apps post to sign in, and to create or reset a group."""
-        return {
-            "EmailAddress": self._email,
-            "Password": self._password,
-            "Device": {
-                "DeviceUUID": self._device_uuid,
-                "DeviceName": self._device_name,
-                "DeviceOSInfo": self._device_os_info,
-            },
-            "AppInfo": {"AppType": 0, "AccountType": 0},
-        }
-
     async def _sign_in(self) -> int:
         self._signed_in = False
-        status, text = await self._send("POST", "/session", self._user_info())
+        status, text = await self._send(
+            "POST",
+            "/session",
+            {
+                "EmailAddress": self._email,
+                "Password": self._password,
+                "Device": {
+                    "DeviceUUID": self._device_uuid,
+                    "DeviceName": self._device_name,
+                    "DeviceOSInfo": self._device_os_info,
+                },
+                "AppInfo": {"AppType": 0, "AccountType": 0},
+            },
+        )
         if status == 401 and _is_reset_reply(text):
             # Every device from before a reset is refused; the app joins as a new device.
             raise AccountResetError(self._account_id)
@@ -195,135 +190,6 @@ class BabyTrackerClient:
             if status != 401:
                 _raise_for_status(status)
             self._signed_in = False
-
-    async def request_password_reset(self, language: str = "en") -> None:
-        """Ask the service to email this client's address a link to reset the password, as the
-        app's "forgot password" screen does: ``POST /account/forgot_password``.
-
-        No session is needed and none is made. ``language`` is the two-letter code the app
-        sends from the phone's locale. The service answers ``200`` when the email is on its
-        way, and ``400`` when it has no account for the address, which raises
-        ``UnknownAccountError``. Any other error status, or no answer, raises as for the other
-        calls. The password itself doesn't change until the link is used.
-        """
-        if not isinstance(language, str) or not (2 <= len(language) <= 3 and language.isalpha()):
-            raise ValueError("language must be a two- or three-letter language code")
-        status, _ = await self._send(
-            "POST",
-            "/account/forgot_password",
-            {
-                "EmailAddress": self._email,
-                "Language": language.lower(),
-                "AppInfo": {"AccountType": 0, "AppType": 0},
-            },
-        )
-        if status == 400:
-            raise UnknownAccountError("the service has no account for this email address")
-        _raise_for_status(status)
-
-    async def create_group(
-        self, seed: bytes | bytearray, pictures: Mapping[str, bytes] | None = None
-    ) -> None:
-        """Create the account's sync group from a seed, as the app does when sync is first
-        turned on. For an address the service doesn't know, this also creates the account.
-
-        ``seed`` is the zip of the app's database, in the form ``get_seed`` returns one.
-        ``pictures`` maps each picture file's name (as ``upload_picture`` takes it) to its JPEG
-        bytes. The steps are the app's: ``POST /staging_account`` with the sign-in body, the
-        seed to ``/staging_account/seed``, each picture to ``/staging_account/picture``, and
-        ``PUT /staging_account`` to finish. Nothing replaces the group until the last step.
-
-        ``GroupExistsError`` means the account already has a group (use ``reset_group``),
-        ``AuthenticationError`` that the password was refused, and ``ProtocolError`` that the
-        service couldn't build the group from what was staged. A seed that isn't a zip or is
-        over ``MAX_SEED_BYTES``, or a bad picture name or file, raises ``ValueError`` before
-        any request.
-
-        The app takes a new device ID before it creates a group, so use a client with a new
-        ``device_uuid``. Afterwards this client is signed out; its next call signs in to the
-        new group, and a ``SyncEngine`` for it must be new.
-        """
-        await self._build_group("/staging_account", seed, pictures)
-
-    async def reset_group(
-        self,
-        seed: bytes | bytearray,
-        pictures: Mapping[str, bytes] | None = None,
-        *,
-        confirm_email: str,
-    ) -> None:
-        """Replace the account's sync group with one built from a seed, as the app's "reset
-        sync" does. **This discards every device's log and removes every device from the
-        group:** each phone has to join again, and only what is in ``seed`` survives.
-
-        It is ``create_group`` with ``POST /account_reset`` as the first step, and takes the
-        same ``seed`` and ``pictures``. ``confirm_email`` must be this client's email address,
-        or nothing is sent: it is there so a reset can't happen by a stray call.
-
-        Every device from before a reset is refused afterwards (``AccountResetError``), this
-        client's included, so use a client with a new ``device_uuid``, as the app does.
-        """
-        if not isinstance(confirm_email, str) or (
-            confirm_email.strip().casefold() != self._email.strip().casefold()
-        ):
-            raise ValueError("confirm_email must be this client's email address")
-        await self._build_group("/account_reset", seed, pictures)
-
-    async def _build_group(
-        self, start: str, seed: bytes | bytearray, pictures: Mapping[str, bytes] | None
-    ) -> None:
-        if not isinstance(seed, bytes | bytearray) or not bytes(seed).startswith(_ZIP_START):
-            raise ValueError("a seed must be the bytes of a zip file")
-        if len(seed) > MAX_SEED_BYTES:
-            raise ValueError(f"a seed can't be more than {MAX_SEED_BYTES} bytes")
-        if pictures is not None and not isinstance(pictures, Mapping):
-            raise ValueError("pictures must map each file name to its JPEG bytes")
-        files = [
-            (_picture_file_name(name), check_jpeg(data, "a picture"))
-            for name, data in (pictures or {}).items()
-        ]
-        seed_form = _form(_SEED_BOUNDARY, "seed", "seed.zip", "application/zip", bytes(seed))
-        slow = aiohttp.ClientTimeout(total=SEED_TIMEOUT, sock_read=self._timeout.total)
-        async with self._sign_in_lock:
-            status, _ = await self._send("POST", start, self._user_info())
-            if status in (401, 403):
-                raise AuthenticationError("the service rejected the email or password")
-            if status == 409:
-                raise GroupExistsError("the account already has a sync group")
-            _raise_for_status(status)
-            await self._stage("/staging_account/seed", _SEED_BOUNDARY, seed_form, slow)
-            for name, jpeg in files:
-                form = _form(_PICTURE_BOUNDARY, "picture", name, "image/jpeg", jpeg)
-                await self._stage("/staging_account/picture", _PICTURE_BOUNDARY, form, None)
-            status, _ = await self._send("PUT", "/staging_account")
-            if status == 424:
-                raise ProtocolError("the service could not build the group from the staged seed")
-            if status == 409:
-                raise GroupExistsError("the account already has a sync group")
-            _raise_for_status(status)
-            # The old session and AccountID belong to the group that was replaced.
-            self._signed_in = False
-            self._account_id = None
-
-    async def _stage(
-        self, path: str, boundary: str, form: bytes, limits: aiohttp.ClientTimeout | None
-    ) -> None:
-        """Post one multipart file to the staging area of a group being built."""
-        status, _ = await self._exchange(
-            "POST",
-            path,
-            None,
-            lambda response: response.text(),
-            allow_redirects=False,
-            limits=limits,
-            data=form,
-            content_type=f"multipart/form-data; boundary={boundary}",
-        )
-        if status == 401:
-            raise AuthenticationError("the service rejected the staging session")
-        if 300 <= status < 400:
-            raise ProtocolError(f"the service redirected the staging upload (HTTP {status})")
-        _raise_for_status(status)
 
     async def get_devices(self) -> list[Device]:
         """Every device in the sync group, with its last transaction number."""
@@ -555,30 +421,6 @@ class BabyTrackerClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             # Sent, but no answer came back: the service may or may not have acted on it.
             raise NoResponseError(f"no answer from the service: {err!r}") from err
-
-
-def _picture_file_name(file_name: object) -> str:
-    """A picture file's name as the service takes it, or ``ValueError``: a plain ".jpg" name
-    with no quote or line break, since it goes into a header line."""
-    if (
-        not isinstance(file_name, str)
-        or not is_plain_file_name(file_name)
-        or not file_name.endswith(".jpg")
-        or not is_plain_file_name(file_name.removesuffix(".jpg"))
-        or any(c in file_name for c in '"\r\n')
-    ):
-        raise ValueError(f"not a picture file name: {file_name!r}")
-    return file_name
-
-
-def _form(boundary: str, field: str, file_name: str, mime: str, data: bytes) -> bytes:
-    """One file as the apps frame a multipart upload."""
-    head = (
-        f"\r\n--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="{field}"; filename="{file_name}"\r\n'
-        f"Content-Type: {mime}\r\n\r\n"
-    ).encode()
-    return head + data + f"\r\n--{boundary}--\r\n".encode()
 
 
 async def _read_capped(response: aiohttp.ClientResponse, *, cap: int) -> bytes:

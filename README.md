@@ -35,16 +35,6 @@ async with aiohttp.ClientSession() as session:
 - `client.sign_out()` ends the session on the service (`DELETE /session`), as the app does when
   it disconnects. A session that had already ended counts as signed out, and the client's next
   call signs in again.
-- `client.request_password_reset()` asks the service to email a password reset link to the
-  client's address, as the app's "forgot password" screen does. It needs no session. An address
-  the service has no account for raises `UnknownAccountError`.
-- `client.create_group(seed, pictures)` creates the account's sync group from a seed (the zip
-  `get_seed()` returns), with the app's four steps: start, upload the seed, upload each picture,
-  finish. `client.reset_group(seed, pictures, confirm_email=)` does the same for an account that
-  already has a group, **discarding every device's log and removing every device**; it sends
-  nothing unless `confirm_email` is the client's own address. Use a client with a new device
-  ID for either, as the app does, and a new `SyncEngine` afterwards. Neither has been run
-  against the live service.
 - `AuthenticationError` means the credentials were rejected. `BabyTrackerConnectionError` means
   the service was unreachable or answered with a server error. A 401 mid-session triggers one
   sign-in and a retry before it becomes an `AuthenticationError`.

@@ -13,16 +13,6 @@ class AuthenticationError(BabyTrackerError):
     """The email or password was rejected, or a fresh sign-in did not stick."""
 
 
-class UnknownAccountError(AuthenticationError):
-    """The service has no account for this email address (its answer to a password reset
-    request for an address it doesn't know)."""
-
-
-class GroupExistsError(BabyTrackerError):
-    """The account already has a sync group, so one can't be created for it. Reset it instead
-    (``BabyTrackerClient.reset_group``), which replaces the group."""
-
-
 class BabyTrackerConnectionError(BabyTrackerError):
     """The service could not be reached, timed out, or answered with a server error."""
 
