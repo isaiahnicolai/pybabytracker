@@ -213,3 +213,25 @@ async def test_this_devices_own_entry_is_deleted_as_before_in_use_or_not(
     await engine.delete_record(client, food.object_id)
 
     assert opcodes(fake_server) == [0, 0, OP_DELETE]
+
+
+async def test_a_record_that_names_an_entry_only_by_its_plain_id_counts_as_a_user(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    # As a seed row comes out when the seed has no food to embed: no feedType, only typeID.
+    by_id = payload_for("OtherFeed", rid(6))
+    by_id.pop("feedType", None)
+    by_id["typeID"] = FOOD["objectID"].lower()
+    dose = payload_for("Medication", rid(7))
+    dose.pop("medicationSelection", None)
+    dose["medID"] = MEDICINE["objectID"]
+    seed(fake_server, FOOD, MEDICINE, solid_of(FOOD, 3), by_id, dose)
+    engine = await synced(client)
+    before = len(fake_server.requests)
+
+    assert engine.entry_users(FOOD["objectID"]) == 2
+    assert engine.entry_users(MEDICINE["objectID"]) == 1
+    with pytest.raises(EntryInUseError) as raised:
+        await engine.delete_record(client, MEDICINE["objectID"], any_device=True)
+    assert raised.value.users == 1
+    assert len(fake_server.requests) == before
