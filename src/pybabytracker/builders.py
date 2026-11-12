@@ -58,6 +58,7 @@ from .models import (
     Medication,
     MedicationSelection,
     Milestone,
+    MilestoneSelection,
     Nursing,
     OtherActivity,
     OtherActivityDescription,
@@ -69,6 +70,7 @@ from .models import (
     Sleep,
     Temperature,
     Vaccine,
+    VaccineSelection,
     Volume,
     VolumeMeasure,
     _selection_name,
@@ -679,7 +681,13 @@ def draft_milestone(
     note: str,
 ) -> Draft[Milestone]:
     """A milestone reached, embedding the milestone it marks as ``milestoneType``."""
-    embedded = dict(selection)
+    # An iPhone-shaped entry (typed) is embedded as the iPhone app embeds one: not new, and dated
+    # 1970. One of any other shape, such as an Android phone's, is embedded as it synced.
+    embedded = (
+        _embedded("MilestoneSelection", selection)
+        if "BCObjectType" in selection
+        else dict(selection)
+    )
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Milestone:
@@ -914,6 +922,70 @@ def draft_other_feed(
     return Draft(OtherFeed, build)
 
 
+# The longest name and description of a milestone or vaccine added to the pick list.
+MAX_PICK_LIST_NAME_LENGTH = 50
+MAX_PICK_LIST_DESCRIPTION_LENGTH = 200
+
+
+def _checked_entry_name(name: object, what: str) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"a {what}'s name must be text")
+    if len(name.strip()) > MAX_PICK_LIST_NAME_LENGTH:
+        raise ValueError(
+            f"a {what}'s name can't be longer than {MAX_PICK_LIST_NAME_LENGTH} characters"
+        )
+    return name.strip()
+
+
+def draft_milestone_type(name: str) -> Draft[MilestoneSelection]:
+    """A new milestone for the pick list, for every baby. The Android app makes one from a name
+    alone, leaving ``forAge`` 0 and ``used`` false, so this writes those in the form a built-in
+    milestone's embedded copy has on iOS (``forAge`` 0, ``used`` "false"), with ``newFlage``
+    "true" and no record fields. The name is written without surrounding spaces."""
+    written = _checked_entry_name(name, "milestone")
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> MilestoneSelection:
+        return MilestoneSelection(
+            object_id=object_id,
+            name=written,
+            for_age=0,
+            used="false",
+            new_flag="true",
+            timestamp=timestamp,
+        )
+
+    return Draft(MilestoneSelection, build)
+
+
+def draft_vaccine_type(name: str, *, description: str) -> Draft[VaccineSelection]:
+    """A new vaccine for the pick list. The Android app makes one from a name and a description,
+    leaving ``forAge`` 0, so this writes those in the form a built-in vaccine's embedded copy
+    has on iOS, with ``newFlage`` "true" and no record fields. ``desc`` is left out when there
+    is no description, as an iPhone's new food has none. Text is written without surrounding
+    spaces."""
+    written = _checked_entry_name(name, "vaccine")
+    if not isinstance(description, str):
+        raise ValueError("a vaccine's description must be text")
+    text = description.strip()
+    if len(text) > MAX_PICK_LIST_DESCRIPTION_LENGTH:
+        raise ValueError(
+            "a vaccine's description can't be longer than "
+            f"{MAX_PICK_LIST_DESCRIPTION_LENGTH} characters"
+        )
+
+    def build(object_id: str, baby: Baby | None, timestamp: datetime) -> VaccineSelection:
+        return VaccineSelection(
+            object_id=object_id,
+            name=written,
+            desc=text or None,
+            for_age=0,
+            new_flag="true",
+            timestamp=timestamp,
+        )
+
+    return Draft(VaccineSelection, build)
+
+
 # The longest name of an activity type added to the pick list, in characters.
 MAX_ACTIVITY_TYPE_NAME_LENGTH = 50
 
@@ -1106,7 +1178,11 @@ def draft_vaccine(
     synced data), and not ``vaccID`` or ``docVisitID``, which the model reads but the app keeps
     in its local database.
     """
-    embedded = dict(selection)
+    # An iPhone-shaped entry (typed) is embedded as the iPhone app embeds one: not new, and dated
+    # 1970. One of any other shape, such as an Android phone's, is embedded as it synced.
+    embedded = (
+        _embedded("VaccineSelection", selection) if "BCObjectType" in selection else dict(selection)
+    )
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Vaccine:

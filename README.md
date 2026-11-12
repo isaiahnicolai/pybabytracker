@@ -138,6 +138,8 @@ key.
 | `add_medication(client, baby_id, medicine, amount=None, ...)` | `Medication` | a dose; `medicine` is a name or ID from `medicine_choices()`, `amount` defaults to its usual dose |
 | `add_activity(client, baby_id, activity, duration=0, ...)` | `OtherActivity` | tummy time, a bath, and so on; `activity` is a name or ID from `activity_choices()` |
 | `add_activity_type(client, name)` | `OtherActivityDescription` | a new activity type for the pick list, such as "Bath"; belongs to the account, so no `baby_id` |
+| `add_milestone_type(client, name)` | `MilestoneSelection` | a new milestone for the pick list, for every baby |
+| `add_vaccine_type(client, name, description="")` | `VaccineSelection` | a new vaccine for the pick list |
 | `add_joy(client, baby_id, note="", pictures=(), ...)` | `Joy` | a moment kept with its note and photos, at least one of the two |
 | `add_growth(client, baby_id, weight=, length=, head=, ...)` | `Growth` | any of the three, each a `Measurement`, rounded to two decimals; weight in decimal `"lb"` (9 lb 4 oz is 9.25) or `"kg"`, length and head in one of `"in"` or `"cm"`; each must be in `GROWTH_RANGES` |
 | `add_temperature(client, baby_id, temperature, ...)` | `Temperature` | `Measurement(value, "F")` or `Measurement(value, "C")`, not converted and rounded to two decimals; must be in `TEMPERATURE_RANGES` |
@@ -153,8 +155,10 @@ key.
   entries `AmbiguousSelectionError` naming their IDs, so pass the ID; all before any request. The three unknown-entry errors share the base
   `UnknownSelectionError` (with `.what`), and a dose with no `amount` for a medicine that has no
   usual dose raises `NoUsualDoseError`.
-  A milestone added for one baby is left out for the others. Adding a new milestone to the pick
-  list isn't supported yet. Vaccines work the same way: the app's 10 built-ins
+  A milestone added for one baby is left out for the others. `add_milestone_type` and
+  `add_vaccine_type` add a new one to the pick list, each posted as a selection of its own in
+  the shape of a new food (expected, not yet seen in synced data for these two). Vaccines work
+  the same way: the app's 10 built-ins
   (`BUILT_IN_VACCINES`) plus synced ones, `vaccine_choices()`, `find_vaccine`, and
   `UnknownVaccineError`. A medicine has no built-ins: `medicine_choices()` lists the ones doses
   already carry, and a `Medication` is logged against one by name or ID. `add_medicine` adds

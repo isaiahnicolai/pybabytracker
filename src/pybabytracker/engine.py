@@ -106,6 +106,7 @@ from .builders import (
     draft_medication,
     draft_medicine,
     draft_milestone,
+    draft_milestone_type,
     draft_nursing,
     draft_other_feed,
     draft_pump,
@@ -113,6 +114,7 @@ from .builders import (
     draft_sleep_start,
     draft_temperature,
     draft_vaccine,
+    draft_vaccine_type,
     edited_payload,
     ended_sleep_payload,
     growth_changes,
@@ -1003,7 +1005,7 @@ class SyncEngine:
         and the ID must be passed instead. The record embeds that milestone as the app does. An
         empty or non-text ``milestone`` raises ``InvalidSelectionNameError``, an unknown one
         ``UnknownMilestoneError``, and no baby ``UnknownBabyError``, all before any request;
-        adding a new milestone to the pick list isn't supported yet. ``pictures`` work as for
+        ``add_milestone_type`` adds a new milestone to the pick list. ``pictures`` work as for
         ``add_activity``, and the other arguments as for ``add_diaper``.
         """
         self._check_baby(target, baby_id)
@@ -1016,6 +1018,68 @@ class SyncEngine:
 
         resolve()  # a bad name or an unknown or ambiguous milestone fails before the lock
         return await self._add(target, baby_id, resolve, object_id, pictures=pictures)
+
+    async def add_milestone_type(
+        self, target: WriteTarget, name: str, *, object_id: str | None = None
+    ) -> MilestoneSelection:
+        """Add a milestone to the account's pick list, for every baby, and apply it locally.
+
+        It is posted as its own ``MilestoneSelection``, as the apps post a new food or medicine
+        before the first record that names it, so mark it reached with ``add_milestone`` and
+        the returned record's ``object_id``. ``name`` is written without surrounding spaces, at
+        most ``MAX_PICK_LIST_NAME_LENGTH`` characters. A name already on the list for any baby
+        (ignoring case, built-in or not) raises ``SelectionExistsError`` with that milestone's
+        ID, and a bad name ``ValueError``, before any request. ``object_id`` works as for
+        ``add_diaper``.
+        """
+
+        def resolve() -> Draft[MilestoneSelection]:
+            draft = draft_milestone_type(name)
+            self._refuse_taken_name("milestone", name, self.milestone_choices(), object_id)
+            return draft
+
+        resolve()
+        return await self._add(target, None, resolve, object_id)
+
+    async def add_vaccine_type(
+        self,
+        target: WriteTarget,
+        name: str,
+        *,
+        description: str = "",
+        object_id: str | None = None,
+    ) -> VaccineSelection:
+        """Add a vaccine to the account's pick list, and apply it locally.
+
+        It is posted as its own ``VaccineSelection``, as for ``add_milestone_type``, so log it
+        given with ``add_vaccine`` and the returned record's ``object_id``. ``name`` (at most
+        ``MAX_PICK_LIST_NAME_LENGTH`` characters) is the short name the list shows, and
+        ``description`` (at most ``MAX_PICK_LIST_DESCRIPTION_LENGTH``) the full one; both are
+        written without surrounding spaces. A name already on the list raises
+        ``SelectionExistsError``, and bad input ``ValueError``, before any request.
+        """
+
+        def resolve() -> Draft[VaccineSelection]:
+            draft = draft_vaccine_type(name, description=description)
+            self._refuse_taken_name("vaccine", name, self.vaccine_choices(), object_id)
+            return draft
+
+        resolve()
+        return await self._add(target, None, resolve, object_id)
+
+    def _refuse_taken_name(
+        self, what: str, name: str, choices: Iterable[SelectionChoice], object_id: str | None
+    ) -> None:
+        """Raise ``SelectionExistsError`` when the pick list already has an entry of that name,
+        ignoring case. A retry names the entry that landed, whatever the case of its id."""
+        wanted = name.strip().casefold()
+        for choice in choices:
+            is_retry = (
+                object_id is not None
+                and self._resolve_id(object_id, (choice.object_id,)) is not None
+            )
+            if choice.name.strip().casefold() == wanted and not is_retry:
+                raise SelectionExistsError(what, name.strip(), choice.object_id)
 
     def milestone_choices(self, baby_id: str | None = None) -> list[SelectionChoice]:
         """Every milestone a record for the baby can name.
