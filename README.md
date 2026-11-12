@@ -259,6 +259,10 @@ key.
   or edit since the last sync is kept; one landing between that read and the post is
   overwritten, as in the app. A deleted or unknown record raises `RecordNotFoundError`; any
   other record (a diaper, a sleep, a baby) `WrongRecordTypeError`.
+- `remove_pictures(client, object_id, pictures=None)` removes photos from a joy, milestone, or
+  activity with an update that marks each one's `pictureNote` entry `deleted`, as the Android
+  app does (expected, not yet seen in synced data). `pictures` names them by
+  `Picture.object_id`; `None` removes all. The files stay on the service.
 - `add_joy(client, baby_id, note=, pictures=)` logs a joy, the app's record for a moment kept
   with a note and photos. It has no fields of its own. A joy with a blank note and no pictures
   raises `ValueError`.

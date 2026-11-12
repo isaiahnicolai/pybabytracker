@@ -124,6 +124,7 @@ from .builders import (
     picture_entry,
     pictured_payload,
     pump_edit,
+    removed_pictures,
     resolve_sleep_end,
     sleep_changes,
     temperature_changes,
@@ -968,6 +969,38 @@ class SyncEngine:
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, not a {wanted}"
             )
+        return record
+
+    async def remove_pictures(
+        self, target: WriteTarget, object_id: str, pictures: Sequence[str] | None = None
+    ) -> Joy | Milestone | OtherActivity:
+        """Remove photos from a joy, milestone, or activity, whichever device made it: post an
+        update (opcode 1) in which each removed photo's ``pictureNote`` entry is marked
+        ``deleted``, as the Android app marks one and saves the record.
+
+        ``pictures`` names the photos by ``Picture.object_id`` (or ``file_name``); ``None``
+        removes every one. The entries stay in the record, so ``record.pictures`` stops listing
+        them and the other devices stop showing them. The files stay on the service, which has
+        no way to delete one. The update is built and timed as for ``edit_record``, and nothing
+        is posted when there is nothing left to remove.
+
+        Refused before any request: ``ValueError`` for a photo the record doesn't have (or an
+        empty list), ``RecordNotFoundError`` for a record never seen or deleted, and
+        ``WrongRecordTypeError`` for any other record type. ``object_id`` can be in either case.
+        """
+        if pictures is not None and (
+            isinstance(pictures, str | bytes) or not isinstance(pictures, Sequence) or not pictures
+        ):
+            raise ValueError("pictures must be a list of picture IDs, or None for every picture")
+        record = await self._edit(
+            target,
+            object_id,
+            lambda record: removed_pictures(record, pictures),
+            Joy,
+            Milestone,
+            OtherActivity,
+        )
+        assert isinstance(record, Joy | Milestone | OtherActivity)
         return record
 
     def _picturable(self, object_id: str) -> Joy | Milestone | OtherActivity:

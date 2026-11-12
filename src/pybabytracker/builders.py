@@ -73,6 +73,7 @@ from .models import (
     VaccineSelection,
     Volume,
     VolumeMeasure,
+    _is_deleted,
     _selection_name,
     check_jpeg,
     numeric_code,
@@ -622,6 +623,50 @@ def pump_edit(
     if total <= 0 and left + right == 0:
         raise ValueError("a pump needs a volume for at least one side, or a length")
     return Edit(changes, drop)
+
+
+def removed_pictures(record: Record, wanted: Sequence[str] | None) -> Edit:
+    """The edit that removes photos from a record: each one's ``pictureNote`` entry stays, with
+    ``deleted`` set, as the Android app marks a removed photo and saves the record. ``deleted``
+    keeps the type the entry has: "true" where the iPhone app wrote "false", and a JSON
+    ``true`` where Android wrote ``false``.
+
+    ``wanted`` names the photos by ``Picture.object_id`` or ``file_name``, in either case;
+    ``None`` removes every photo. A name the record has no photo for raises ``ValueError``.
+    """
+    entries = record.to_payload().get("pictureNote")
+    listed = list(entries) if isinstance(entries, list) else []
+    live = [
+        i
+        for i, entry in enumerate(listed)
+        if isinstance(entry, dict) and not _is_deleted(entry.get("deleted"))
+    ]
+    if wanted is None:
+        targets = set(live)
+    else:
+        if isinstance(wanted, str | bytes) or not isinstance(wanted, Sequence) or not wanted:
+            raise ValueError("pictures must be a list of picture IDs, or None for every picture")
+        targets = set()
+        for name in wanted:
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("each picture must be named by its ID")
+            key = name.strip().upper()
+            found = [
+                i
+                for i in live
+                if key
+                in (str(listed[i].get("objectID")).upper(), str(listed[i].get("fileName")).upper())
+            ]
+            if not found:
+                raise ValueError(f"record {record.object_id} has no picture {name!r}")
+            targets.update(found)
+    changed = [
+        {**entry, "deleted": True if isinstance(entry.get("deleted"), bool) else "true"}
+        if i in targets
+        else entry
+        for i, entry in enumerate(listed)
+    ]
+    return Edit({"pictureNote": changed})
 
 
 def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str, Any]:
