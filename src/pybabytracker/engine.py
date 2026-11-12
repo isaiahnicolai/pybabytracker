@@ -1970,9 +1970,13 @@ class SyncEngine:
 
         With ``any_device`` true, a record another device created can be deleted too, as the
         apps delete each other's records (and this library's), with the same payload. That
-        covers a baby's records, pumps, and pick-list entries. A baby another device created
-        raises ``WrongRecordTypeError``, and so does a record of a type the library doesn't
-        know. A record never seen, or already deleted, raises ``RecordNotFoundError``.
+        covers a baby's records, pumps, pick-list entries, and babies. A record of a type the
+        library doesn't know raises ``WrongRecordTypeError``. A record never seen, or already
+        deleted, raises ``RecordNotFoundError``.
+
+        A baby, this device's own or another's, raises ``EntryInUseError`` while any record
+        known from sync belongs to it (``baby_users`` counts them): the apps refuse to delete a
+        baby that still has records and post it back. Delete its records first.
 
         A pick-list entry another device added (a food, a medicine, a milestone, a vaccine, an
         activity type) raises ``EntryInUseError`` while any record known from sync still names
@@ -1995,6 +1999,11 @@ class SyncEngine:
                 await self._catch_up(target)
             elif object_id not in self._records:
                 raise RecordNotFoundError(f"record {object_id} is already deleted")
+            elif isinstance(self._records.get(object_id), Baby):
+                # A baby this device added: refused while it has records, like any other baby,
+                # including records another device added since the last sync.
+                self._refuse_baby_in_use(object_id)
+                await self._catch_up(target)
             number = await self._prepare(target)
             # The catch-up may have brought in a delete, or another device's newer version.
             record = (
@@ -2006,6 +2015,8 @@ class SyncEngine:
                 raise RecordNotFoundError(f"record {object_id} is already deleted")
             if object_id not in self._created:
                 self._refuse_entry_in_use(record)
+            if isinstance(record, Baby):
+                self._refuse_baby_in_use(object_id)
             payload = record.to_payload()
             payload["newFlage"] = "false"
             await self._send(target, number, OP_DELETE, encode_transaction(decode_payload(payload)))
@@ -2013,12 +2024,12 @@ class SyncEngine:
     def _deletable(self, object_id: str) -> Record:
         """Another device's record ``object_id`` names, or raise why it can't be deleted."""
         if object_id in self.babies():
-            raise WrongRecordTypeError(
-                f"record {object_id} is a Baby, which only the device that created it can delete"
-            )
+            # A baby with records can't be deleted, and one known only from the copies its
+            # records carry has records by definition.
+            self._refuse_baby_in_use(object_id)
         record = self._saved_record(object_id)
         if isinstance(record, _NOT_DELETABLE_FROM_OTHERS) and not isinstance(
-            record, _PICK_LIST_TYPES
+            record, (*_PICK_LIST_TYPES, Baby)
         ):
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, which only the "
@@ -2059,6 +2070,24 @@ class SyncEngine:
             if isinstance(named, str) and named.upper() == wanted:
                 count += 1
         return count
+
+    def baby_users(self, baby_id: str) -> int:
+        """How many records known from sync belong to the baby ``baby_id``. The id matches
+        whatever its case."""
+        wanted = baby_id.upper()
+        return sum(
+            1
+            for record in self._records.values()
+            if not isinstance(record, Baby)
+            and isinstance(record.baby_id, str)
+            and record.baby_id.upper() == wanted
+        )
+
+    def _refuse_baby_in_use(self, baby_id: str) -> None:
+        """Raise ``EntryInUseError`` when the baby still has records."""
+        users = self.baby_users(baby_id)
+        if users:
+            raise EntryInUseError("baby", baby_id, users)
 
     def _refuse_entry_in_use(self, record: Record | None) -> None:
         """Raise ``EntryInUseError`` when ``record`` is a pick-list entry records still name."""

@@ -90,10 +90,10 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   `RecordNotFoundError` if one is already deleted. Like the app, the delete sends the record as
   last saved with only `newFlage` set to `"false"`; its timestamp is not bumped.
   With `any_device=True` it also deletes a record another device added, as the apps delete each
-  other's records, with the same payload: a baby's records, pumps, and pick-list entries, but
-  not a baby (`WrongRecordTypeError`). A pick-list entry another device added raises
-  `EntryInUseError` while a record still names it (`entry_users(object_id)` counts them), since
-  the apps refuse that delete and post the entry back.
+  other's records, with the same payload: a baby's records, pumps, pick-list entries, and
+  babies. A pick-list entry another device added raises `EntryInUseError` while a record still
+  names it (`entry_users(object_id)` counts them), and so does any baby that still has records
+  (`baby_users(baby_id)`), since the apps refuse those deletes and post the entry or baby back.
 - `rename_entry(client, object_id, name)` renames a food, medicine, milestone, vaccine, or
   activity type that has a record of its own, with an update of that record (expected, not yet
   seen in synced data). A name another entry of the list has raises `SelectionExistsError`.

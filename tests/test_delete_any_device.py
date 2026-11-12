@@ -14,6 +14,7 @@ from pybabytracker import (
     OP_DELETE,
     AccountChangedError,
     BabyTrackerClient,
+    EntryInUseError,
     NotOwnRecordError,
     RecordNotFoundError,
     SyncEngine,
@@ -140,7 +141,7 @@ async def test_without_any_device_another_devices_record_is_still_refused(
     [
         ("NO-SUCH-RECORD", RecordNotFoundError),
         (rid(7), RecordNotFoundError),  # already deleted
-        (BABY_ID, WrongRecordTypeError),
+        (BABY_ID, EntryInUseError),  # a baby that still has records
         (rid(9), WrongRecordTypeError),  # a type the library doesn't know
     ],
 )
