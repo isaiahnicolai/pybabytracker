@@ -32,6 +32,8 @@ from typing import Any, NamedTuple
 
 from .exceptions import NoUsualDoseError
 from .models import (
+    DIAPER_AMOUNT_NORMAL,
+    DIAPER_AMOUNTS,
     DIAPER_DIRTY,
     DIAPER_MIXED,
     DIAPER_WET,
@@ -314,17 +316,20 @@ def _edited_time(moment: object, name: str) -> str:
     return format_time(moment.astimezone(UTC).replace(microsecond=0))
 
 
-def diaper_changes(status: int | None) -> dict[str, Any]:
-    """A diaper's kind, checked as for ``draft_diaper``."""
-    if status is None:
-        return {}
-    if (
-        isinstance(status, bool)
-        or not isinstance(status, int)
-        or status not in (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED)
-    ):
-        raise ValueError(f"unknown diaper status: {status!r}")
-    return {"status": status}
+def diaper_changes(status: int | None, amount: int | None = None) -> dict[str, Any]:
+    """A diaper's kind and amount, checked as for ``draft_diaper``."""
+    changes: dict[str, Any] = {}
+    if status is not None:
+        if (
+            isinstance(status, bool)
+            or not isinstance(status, int)
+            or status not in (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED)
+        ):
+            raise ValueError(f"unknown diaper status: {status!r}")
+        changes["status"] = status
+    if amount is not None:
+        changes["amount"] = _checked_diaper_amount(amount)
+    return changes
 
 
 def bottle_changes(volume: Volume | None) -> dict[str, Any]:
@@ -630,19 +635,33 @@ def edited_payload(record: Record, edit: Edit, timestamp: datetime) -> dict[str,
     return payload
 
 
+def _checked_diaper_amount(amount: object) -> int:
+    """A diaper's amount: one of ``DIAPER_AMOUNTS``."""
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount not in DIAPER_AMOUNTS:
+        raise ValueError(f"unknown diaper amount: {amount!r}")
+    return amount
+
+
 def draft_diaper(
-    status: int, *, time: datetime | None, timezone_offset: int | None, note: str
+    status: int,
+    *,
+    time: datetime | None,
+    timezone_offset: int | None,
+    note: str,
+    amount: int = DIAPER_AMOUNT_NORMAL,
 ) -> Draft[Diaper]:
     if status not in (DIAPER_WET, DIAPER_DIRTY, DIAPER_MIXED):
         raise ValueError(f"unknown diaper status: {status!r}")
+    written_amount = _checked_diaper_amount(amount)
     event, tz, text = _common(time, timezone_offset, note)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> Diaper:
         return Diaper(
             **_base(object_id, baby, timestamp, event, tz, text),
             status=status,
-            # What the app filled in on the captured add (PROTOCOL.md) with only a type set.
-            amount=2,
+            # What the app filled in on the captured add (PROTOCOL.md) with only a type set:
+            # a normal amount, and these.
+            amount=written_amount,
             pee_color=5,
             poo_color=5,
             texture=5,

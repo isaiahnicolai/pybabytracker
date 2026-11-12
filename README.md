@@ -98,7 +98,7 @@ The engine posts as its own device (`device_uuid`, which must match the client's
   `timestamp` changed. It edits a baby's record or a pump, and posts nothing when the record
   already has the values, so a retry is safe. A sleep's or nursing's length is kept when its
   start moves.
-- `edit_diaper` (`status`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
+- `edit_diaper` (`status`, `amount`), `edit_bottle` (`volume`), `edit_nursing` (`left_minutes`,
   `right_minutes`, `finish_side`), `edit_sleep` (`start`, `end`), `edit_temperature`
   (`temperature`), `edit_growth` (`weight`, `length`, `head`), `edit_medication` (`amount`),
   `edit_other_feed` (`amount`, `unit`), `edit_activity` (`duration`), and `edit_pump` (`amount`
@@ -127,7 +127,7 @@ key.
 
 | Method | Writes | Notes |
 |---|---|---|
-| `add_diaper(client, baby_id, status, ...)` | `Diaper` | `DIAPER_WET`, `DIAPER_DIRTY`, `DIAPER_MIXED` |
+| `add_diaper(client, baby_id, status, amount=DIAPER_AMOUNT_NORMAL, ...)` | `Diaper` | `DIAPER_WET`, `DIAPER_DIRTY`, `DIAPER_MIXED`; `amount` is one of `DIAPER_AMOUNTS` (none, light, normal, heavy, overflow, not set) |
 | `add_formula(client, baby_id, volume=, ...)` | `Formula` | volume more than zero |
 | `add_pumped(client, baby_id, volume=, ...)` | `Pumped` | a bottle of pumped milk |
 | `add_nursing(client, baby_id, left_minutes=, right_minutes=, ...)` | `Nursing` | a finished session |

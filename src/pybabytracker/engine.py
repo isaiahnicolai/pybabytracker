@@ -152,6 +152,7 @@ from .exceptions import (
     WrongRecordTypeError,
 )
 from .models import (
+    DIAPER_AMOUNT_NORMAL,
     OP_ADD,
     OP_DELETE,
     OP_UPDATE,
@@ -433,6 +434,7 @@ class SyncEngine:
         baby_id: str,
         status: int,
         *,
+        amount: int = DIAPER_AMOUNT_NORMAL,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str = "",
@@ -440,7 +442,9 @@ class SyncEngine:
     ) -> Diaper:
         """Post a new diaper for a baby known from sync, and apply it locally.
 
-        ``status`` is ``DIAPER_WET``, ``DIAPER_DIRTY``, or ``DIAPER_MIXED``. ``time`` (aware)
+        ``status`` is ``DIAPER_WET``, ``DIAPER_DIRTY``, or ``DIAPER_MIXED``. ``amount`` is one
+        of ``DIAPER_AMOUNTS`` and defaults to ``DIAPER_AMOUNT_NORMAL``, which is what the apps
+        write when only a kind is picked. ``time`` (aware)
         defaults to now. ``timezone_offset`` (seconds east of UTC) defaults to ``time``'s offset.
         The app itself writes the zone's *standard* offset all year, ignoring daylight saving
         (-18000 for Eastern in July and January), so for a record that matches it pass
@@ -450,7 +454,9 @@ class SyncEngine:
         to another device's id apart from case raises ``ObjectIdInUseError``. Every ``add_*``
         method shares these rules. Bad input raises ``ValueError`` before any request.
         """
-        draft = draft_diaper(status, time=time, timezone_offset=timezone_offset, note=note)
+        draft = draft_diaper(
+            status, time=time, timezone_offset=timezone_offset, note=note, amount=amount
+        )
         return await self._add(target, baby_id, draft, object_id)
 
     async def add_joy(
@@ -552,18 +558,20 @@ class SyncEngine:
         object_id: str,
         *,
         status: int | None = None,
+        amount: int | None = None,
         time: datetime | None = None,
         timezone_offset: int | None = None,
         note: str | None = None,
     ) -> Diaper:
         """Change a saved diaper: its ``status`` (``DIAPER_WET``, ``DIAPER_DIRTY``, or
-        ``DIAPER_MIXED``), and its time, zone, and note as for ``edit_record``, whose rules it
-        shares. Give at least one. A record that isn't a diaper raises ``WrongRecordTypeError``.
+        ``DIAPER_MIXED``), its ``amount`` (one of ``DIAPER_AMOUNTS``), and its time, zone, and
+        note as for ``edit_record``, whose rules it shares. Give at least one. A record that
+        isn't a diaper raises ``WrongRecordTypeError``.
         """
         common = common_changes(
             time=time, timezone_offset=timezone_offset, note=note, required=False
         )
-        edit = Edit(_some({**diaper_changes(status), **common}))
+        edit = Edit(_some({**diaper_changes(status, amount), **common}))
         record = await self._edit(target, object_id, lambda record: edit, Diaper)
         assert isinstance(record, Diaper)
         return record

@@ -28,6 +28,25 @@ OP_DELETE = 2
 DIAPER_WET = 0
 DIAPER_DIRTY = 1
 DIAPER_MIXED = 2
+# A dry diaper, in the Android app's list of kinds. Read only: not yet seen in synced data, so
+# nothing writes it.
+DIAPER_DRY = 3
+# A diaper's ``amount``. Normal and not set are the two seen in synced data (the apps write
+# normal on a plain add); the other values are the Android app's own list.
+DIAPER_AMOUNT_NONE = 0
+DIAPER_AMOUNT_LIGHT = 1
+DIAPER_AMOUNT_NORMAL = 2
+DIAPER_AMOUNT_HEAVY = 3
+DIAPER_AMOUNT_OVERFLOW = 4
+DIAPER_AMOUNT_NOT_SET = 5
+DIAPER_AMOUNTS = (
+    DIAPER_AMOUNT_NONE,
+    DIAPER_AMOUNT_LIGHT,
+    DIAPER_AMOUNT_NORMAL,
+    DIAPER_AMOUNT_HEAVY,
+    DIAPER_AMOUNT_OVERFLOW,
+    DIAPER_AMOUNT_NOT_SET,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
