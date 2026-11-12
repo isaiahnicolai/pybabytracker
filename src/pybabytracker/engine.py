@@ -2081,23 +2081,30 @@ class SyncEngine:
 
     def entry_users(self, object_id: str) -> int:
         """How many records known from sync name the pick-list entry ``object_id``: doses of a
-        medicine, solid foods of a food, and so on. The id matches whatever its case."""
+        medicine, solid foods of a food, and so on. The id matches whatever its case.
+
+        A record names an entry by the copy it embeds, or by the plain ID a seed row keeps when
+        the seed has no entry to embed (``typeID``, ``medID``, ``vaccID``,
+        ``milestoneSelectionID``, an activity's ``descID``). Both count: a real seed had 63
+        solid foods naming a food only that way.
+        """
         wanted = object_id.upper()
         count = 0
         for record in self._records.values():
             embedded: object = None
+            plain: object = None
             if isinstance(record, Medication):
-                embedded = record.medication_selection
+                embedded, plain = record.medication_selection, record.extra.get("medID")
             elif isinstance(record, Milestone):
-                embedded = record.milestone_type
+                embedded, plain = record.milestone_type, record.milestone_selection_id
             elif isinstance(record, Vaccine):
-                embedded = record.vaccine_type
+                embedded, plain = record.vaccine_type, record.vacc_id
             elif isinstance(record, OtherFeed):
-                embedded = record.feed_type
+                embedded, plain = record.feed_type, record.type_id
             elif isinstance(record, OtherActivity):
-                embedded = record.desc
+                embedded, plain = record.desc, record.desc_id
             named = embedded.get("objectID") if isinstance(embedded, Mapping) else None
-            if isinstance(named, str) and named.upper() == wanted:
+            if any(isinstance(i, str) and i.upper() == wanted for i in (named, plain)):
                 count += 1
         return count
 
