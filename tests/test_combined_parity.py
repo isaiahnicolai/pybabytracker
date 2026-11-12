@@ -11,6 +11,7 @@ from selection_helpers import PHONE, rid, seed, synced
 
 from pybabytracker import (
     OP_CONFLICT,
+    OP_RELIVE,
     BabyTrackerClient,
     EntryInUseError,
     OtherActivity,
@@ -79,3 +80,39 @@ async def test_a_folded_entrys_records_count_as_the_winners_users(
     renamed = await engine.rename_entry(client, BATH["objectID"], "Bath time")
     assert isinstance(renamed, OtherActivityDescription)
     assert engine.find_activity("bath time").object_id == BATH["objectID"]
+
+
+async def test_a_record_naming_the_loser_by_a_plain_id_counts_as_the_winners_user(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    # As a seed row whose activity type the seed doesn't hold: only descID, no embedded copy.
+    plain = payload_for("OtherActivity", rid(5))
+    plain.pop("desc", None)
+    plain["descID"] = BATH_TWIN["objectID"].lower()
+    seed(fake_server, BATH, BATH_TWIN, activity_of(BATH, 3), plain)
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(BATH, BATH_TWIN))
+
+    engine = await synced(client)
+
+    assert engine.entry_users(BATH["objectID"]) == 2
+    entry = engine.entry_of(engine.records[rid(5)])
+    assert entry is not None and entry.object_id == BATH["objectID"]
+
+
+async def test_an_entry_a_phone_relived_after_this_device_deleted_it_can_be_renamed(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    seed(fake_server)
+    engine = await synced(client)
+    food = await engine.add_food(client, "Oatmeal")
+    await engine.add_other_feed(client, BABY_ID, "Oatmeal", amount=1, unit="Oz")
+    await engine.delete_record(client, food.object_id)  # its own entry, though in use
+    assert engine.is_deleted(food.object_id)
+
+    # The phone has the solid food, refuses the delete, and posts its copy.
+    fake_server.add_transaction(PHONE, OP_RELIVE, {**food.to_payload(), "newFlage": "false"})
+    await engine.sync(client)
+
+    assert not engine.is_deleted(food.object_id)
+    renamed = await engine.rename_entry(client, food.object_id, "Porridge")
+    assert engine.find_food("Porridge").object_id == renamed.object_id
