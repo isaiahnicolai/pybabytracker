@@ -301,7 +301,6 @@ async def test_the_client_signs_in_to_the_new_group_on_its_next_call(
     assert await client.get_seed() == SEED
 
     assert client.account_id == fake_server.account_id
-    assert [d.device_uuid for d in await client.get_devices()] == [PROBE_UUID]
 
 
 async def test_an_account_is_set_up_from_nothing_and_written_to(

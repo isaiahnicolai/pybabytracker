@@ -198,7 +198,8 @@ class BabyTrackerClient:
         failure, call it again.
 
         Afterwards this client is signed out, and its next call signs in to the new group as
-        this client's device. Use a ``SyncEngine`` that has no saved state with it.
+        this client's device. The group lists no device until one posts. Use a ``SyncEngine``
+        that has no saved state with it.
         """
         if not isinstance(seed, bytes | bytearray) or not bytes(seed).startswith(_ZIP_START):
             raise ValueError("a seed must be the bytes of a zip file")

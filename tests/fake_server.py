@@ -107,9 +107,9 @@ class FakeSyncServer:
         # The account's seed zip; None answers with missing_seed_status.
         self.seed: bytes | None = None
         # Whether the account has a sync group, and the groups being built: staging cookie ->
-        # the device that started it and the seed staged so far.
+        # the seed staged so far.
         self.has_group = True
-        self.staging: dict[str, dict[str, Any]] = {}
+        self.staging: dict[str, bytes | None] = {}
         # The status PUT /staging_account answers instead of finishing (None: finish).
         self.finish_status: int | None = None
         self.missing_seed_status = 404
@@ -225,7 +225,7 @@ class FakeSyncServer:
         # An address with no account gets one, with the password given.
         self.email, self.password = body["EmailAddress"], body["Password"]
         token = secrets.token_hex(8)
-        self.staging[token] = {"device": body["Device"], "seed": None}
+        self.staging[token] = None
         response = web.Response(status=200, text="")
         response.set_cookie("PHPSESSID", token)
         return response
@@ -252,7 +252,7 @@ class FakeSyncServer:
         ).encode()
         tail = f"\r\n--{boundary}--\r\n".encode()
         assert body.startswith(head) and body.endswith(tail)
-        self.staging[token]["seed"] = body[len(head) : -len(tail)]
+        self.staging[token] = body[len(head) : -len(tail)]
         return web.Response(status=201, text="")
 
     async def _put_staging(self, request: web.Request) -> web.Response:
@@ -263,16 +263,14 @@ class FakeSyncServer:
             return web.Response(status=401, text="Unauthorized")
         if self.finish_status is not None:
             return web.Response(status=self.finish_status, text="forced")
-        if self.staging[token]["seed"] is None:
+        if self.staging[token] is None:
             return web.Response(status=424, text="")
-        staged = self.staging.pop(token)
-        self.seed = staged["seed"]
+        self.seed = self.staging.pop(token)
         self.account_id += 1
         self.has_group = True
         self.sessions.clear()
-        # The device that made the group is its first (expected, not yet seen).
+        # A new group lists no device, not even the one that made it (seen live 2026-11-14).
         self.devices.clear()
-        self.add_device(staged["device"]["DeviceUUID"], staged["device"]["DeviceName"])
         return web.Response(status=200, text="")
 
     async def _guard(self, request: web.Request) -> web.Response | None:

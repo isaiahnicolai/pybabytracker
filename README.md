@@ -342,8 +342,9 @@ await engine.sync(client)  # reads the new seed
 For an email address the service doesn't know, `create_group` creates the account with the
 client's password. For one that already has a group it raises `GroupExistsError` and changes
 nothing; it never replaces a group. The seed has every table and index the Android app creates,
-and the pick-list entries it ships with, checked against a real account's seed. Expected, not yet
-seen: that the service takes a seed this library made, and that a phone joins the group.
+and the pick-list entries it ships with, checked against a real account's seed. Seen against the
+live service: an account made this way signs in, gives its seed back, and takes records from two
+devices. A new group lists no device until one posts. Not yet seen: a phone joining such a group.
 
 ## Command line
 
