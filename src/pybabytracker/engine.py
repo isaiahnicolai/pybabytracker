@@ -18,8 +18,8 @@ Rules:
     newer timestamp than the tombstone.
 
 - The apps' two repair operations are recognized. A Relive (opcode 3) brings back a baby or
-  pick-list entry whose delete a device refused because records still use it; it isn't
-  applied, since those records already keep it in ``babies()`` and the choice lists. A
+  pick-list entry whose delete a device refused because records still use it: its copy is
+  stored when this engine holds a delete of the entry or never had it. A
   Conflict (opcode 4) pairs two babies or entries of one name, a winner and a loser: the
   winner is stored, the loser's own record goes, and every record naming the loser names the
   winner instead, including one that arrives later. ``merged_entries`` lists them.
@@ -1634,10 +1634,11 @@ class SyncEngine:
                 where,
             )
             return False
-        folded_into = self._winner_of(winner.object_id)
-        if folded_into is not None and folded_into.upper() == loser.object_id.upper():
-            # This winner was already folded into this loser. Folding back would leave neither.
-            _LOGGER.debug("Skipping a Conflict that reverses one already applied (%s)", where)
+        ends = {(self._winner_of(e.object_id) or e.object_id).upper() for e in (winner, loser)}
+        if len(ends) == 1 and winner.object_id.upper() != loser.object_id.upper():
+            # Earlier Conflicts already folded these two into one entry. Folding the loser into
+            # this winner would point that entry back at itself and leave neither.
+            _LOGGER.debug("Skipping a Conflict between two entries already folded (%s)", where)
             return False
         stamp = winner.timestamp.timestamp() if winner.timestamp is not None else 0.0
         self._store(winner, _Version(stamp, _RANK_UPDATE, device_uuid, transaction.sync_id))
