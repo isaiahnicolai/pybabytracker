@@ -106,6 +106,12 @@ class FakeSyncServer:
         self.picture_chunked = False
         # The account's seed zip; None answers with missing_seed_status.
         self.seed: bytes | None = None
+        # Whether the account has a sync group, and the groups being built: staging cookie ->
+        # the device that started it and the seed staged so far.
+        self.has_group = True
+        self.staging: dict[str, dict[str, Any]] = {}
+        # The status PUT /staging_account answers instead of finishing (None: finish).
+        self.finish_status: int | None = None
         self.missing_seed_status = 404
         # Answer the seed request with a redirect to this location.
         self.seed_redirect: str | None = None
@@ -148,6 +154,9 @@ class FakeSyncServer:
     def app(self) -> web.Application:
         app = web.Application()
         app.router.add_post("/session", self._post_session)
+        app.router.add_post("/staging_account", self._post_staging)
+        app.router.add_post("/staging_account/seed", self._post_staged_seed)
+        app.router.add_put("/staging_account", self._put_staging)
         app.router.add_get("/account/device", self._get_devices)
         app.router.add_get("/account/transaction/{uuid}/{since}", self._get_transactions)
         app.router.add_post("/account/transaction", self._post_transaction)
@@ -201,6 +210,70 @@ class FakeSyncServer:
         response = self._json({"AccountID": self.account_id})
         response.set_cookie("PHPSESSID", token)
         return response
+
+    async def _post_staging(self, request: web.Request) -> web.Response:
+        """Start building a group, as the Android app reads the answers: 200, or 409 when the
+        account has one."""
+        await self._record(request)
+        if self.force_status is not None:
+            return web.Response(status=self.force_status, text="forced")
+        body = self.requests[-1].body
+        if self.has_group:
+            if body["EmailAddress"] != self.email or body["Password"] != self.password:
+                return web.Response(status=401, text="Unauthorized")
+            return web.Response(status=409, text="")
+        # An address with no account gets one, with the password given.
+        self.email, self.password = body["EmailAddress"], body["Password"]
+        token = secrets.token_hex(8)
+        self.staging[token] = {"device": body["Device"], "seed": None}
+        response = web.Response(status=200, text="")
+        response.set_cookie("PHPSESSID", token)
+        return response
+
+    async def _post_staged_seed(self, request: web.Request) -> web.Response:
+        """Take the seed for a group being built, framed exactly as the apps frame it."""
+        await self._record(request)
+        token = request.cookies.get("PHPSESSID", "")
+        if token not in self.staging:
+            return web.Response(status=401, text="Unauthorized")
+        for suffix, status in self.fail_paths.items():
+            if request.path.endswith(suffix):
+                if 300 <= status < 400:
+                    return web.Response(status=status, headers={"Location": "/elsewhere/seed"})
+                return web.Response(status=status, text="forced")
+        body = self.requests[-1].body
+        assert isinstance(body, bytes)
+        boundary = "__BABY_TRACKER_BOUNDARY____SEED__"
+        assert request.headers["Content-Type"] == f"multipart/form-data; boundary={boundary}"
+        head = (
+            f"\r\n--{boundary}\r\n"
+            'Content-Disposition: form-data; name="seed"; filename="seed.zip"\r\n'
+            "Content-Type: application/zip\r\n\r\n"
+        ).encode()
+        tail = f"\r\n--{boundary}--\r\n".encode()
+        assert body.startswith(head) and body.endswith(tail)
+        self.staging[token]["seed"] = body[len(head) : -len(tail)]
+        return web.Response(status=201, text="")
+
+    async def _put_staging(self, request: web.Request) -> web.Response:
+        """Finish a group: the staged seed becomes the account's."""
+        await self._record(request)
+        token = request.cookies.get("PHPSESSID", "")
+        if token not in self.staging:
+            return web.Response(status=401, text="Unauthorized")
+        if self.finish_status is not None:
+            return web.Response(status=self.finish_status, text="forced")
+        if self.staging[token]["seed"] is None:
+            return web.Response(status=424, text="")
+        staged = self.staging.pop(token)
+        self.seed = staged["seed"]
+        self.account_id += 1
+        self.has_group = True
+        self.sessions.clear()
+        # The device that made the group is its first (expected, not yet seen).
+        self.devices.clear()
+        self.add_device(staged["device"]["DeviceUUID"], staged["device"]["DeviceName"])
+        return web.Response(status=200, text="")
 
     async def _guard(self, request: web.Request) -> web.Response | None:
         await self._record(request)
