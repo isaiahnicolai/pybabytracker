@@ -165,16 +165,20 @@ def _minutes(value: object, name: str) -> int:
     return value
 
 
+def _checked_side(finish_side: int) -> int:
+    if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
+        raise ValueError(
+            f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
+        )
+    return finish_side
+
+
 def _side(finish_side: int | None, left_used: bool, right_used: bool) -> int:
     """The record's side (``finishSide``, which the app shows as the side a session started on):
     as given, else the only side used, else ``SIDE_NONE`` when both were, since the start can't be
     told from the totals. The app also saves a two-sided pump with no side."""
     if finish_side is not None:
-        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
-            raise ValueError(
-                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
-            )
-        return finish_side
+        return _checked_side(finish_side)
     if left_used and right_used:
         return SIDE_NONE
     return SIDE_LEFT if left_used else SIDE_RIGHT
@@ -223,11 +227,7 @@ def draft_baby(
     plus ``dueDay`` and ``pictureName`` when there is a due date and a photo. The Android app's
     new-baby screen asks for the same three things (a name, boy or girl, and a birth date) and
     leaves the other two out when they aren't given. Dates are written in UTC to the second."""
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("a baby's name must be text")
-    written = name.strip()
-    if len(written) > MAX_BABY_NAME_LENGTH:
-        raise ValueError(f"a baby's name can't be longer than {MAX_BABY_NAME_LENGTH} characters")
+    written = _text(name, "a baby's name", MAX_BABY_NAME_LENGTH)
     if not isinstance(boy, bool):
         raise ValueError("boy must be True or False")
     dob = _edited_time(birth, "birth")
@@ -329,12 +329,11 @@ def common_changes(
     time: datetime | None,
     timezone_offset: int | None,
     note: str | None,
-    required: bool = True,
 ) -> dict[str, Any]:
     """The payload keys an edit of a record's time or note changes, checked. ``time`` (aware)
     is written in UTC to the second. ``timezone`` changes only when ``timezone_offset`` is
     given: an iPhone that moved a diaper's time by an hour left it alone (captured
-    2026-11-12). With ``required``, giving none of them raises."""
+    2026-11-12)."""
     changes: dict[str, Any] = {}
     if time is not None:
         changes["time"] = _edited_time(time, "time")
@@ -346,8 +345,6 @@ def common_changes(
         if not isinstance(note, str):
             raise ValueError("note must be text")
         changes["note"] = note
-    if required and not changes:
-        raise ValueError("give a time, a timezone_offset, or a note to change")
     return changes
 
 
@@ -402,11 +399,7 @@ def nursing_edit(
     2026-11-12: ``rightDuration`` 0 to 7)."""
     changes: dict[str, Any] = {}
     if finish_side is not None:
-        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
-            raise ValueError(
-                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
-            )
-        changes["finishSide"] = finish_side
+        changes["finishSide"] = _checked_side(finish_side)
     if left_minutes is None and right_minutes is None:
         return Edit(changes)
     left = (
@@ -485,13 +478,7 @@ def baby_changes(
     JSON bool."""
     changes: dict[str, Any] = {}
     if name is not None:
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("a baby's name must be text")
-        if len(name.strip()) > MAX_BABY_NAME_LENGTH:
-            raise ValueError(
-                f"a baby's name can't be longer than {MAX_BABY_NAME_LENGTH} characters"
-            )
-        changes["name"] = name.strip()
+        changes["name"] = _text(name, "a baby's name", MAX_BABY_NAME_LENGTH)
     if birth is not None:
         changes["dob"] = _edited_time(birth, "birth")
     if due is not None:
@@ -631,11 +618,7 @@ def pump_edit(
     changes: dict[str, Any] = {}
     drop: tuple[str, ...] = ()
     if finish_side is not None:
-        if isinstance(finish_side, bool) or finish_side not in (SIDE_NONE, SIDE_LEFT, SIDE_RIGHT):
-            raise ValueError(
-                f"finish_side must be SIDE_LEFT, SIDE_RIGHT, or SIDE_NONE, not {finish_side!r}"
-            )
-        changes["finishSide"] = finish_side
+        changes["finishSide"] = _checked_side(finish_side)
     left = numeric_code(pump.left_duration) or 0
     right = numeric_code(pump.right_duration) or 0
     if left_minutes is not None:
@@ -1090,13 +1073,7 @@ MAX_PICK_LIST_DESCRIPTION_LENGTH = 200
 
 
 def _checked_entry_name(name: object, what: str) -> str:
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"a {what}'s name must be text")
-    if len(name.strip()) > MAX_PICK_LIST_NAME_LENGTH:
-        raise ValueError(
-            f"a {what}'s name can't be longer than {MAX_PICK_LIST_NAME_LENGTH} characters"
-        )
-    return name.strip()
+    return _text(name, f"a {what}'s name", MAX_PICK_LIST_NAME_LENGTH)
 
 
 def draft_milestone_type(name: str) -> Draft[MilestoneSelection]:
@@ -1148,24 +1125,13 @@ def draft_vaccine_type(name: str, *, description: str) -> Draft[VaccineSelection
     return Draft(VaccineSelection, build)
 
 
-# The longest name of an activity type added to the pick list, in characters.
-MAX_ACTIVITY_TYPE_NAME_LENGTH = 50
-
-
 def draft_activity_type(name: str) -> Draft[OtherActivityDescription]:
     """A new activity type for the pick list, in the shape an iPhone's new food has with a
     food's own ``bottle`` left out: ``BCObjectType``, ``objectID``, ``name``, ``newFlage``
     "true", and ``timestamp``, with no record fields. That is also the copy the iPhone app
     embeds in an activity of a custom type, apart from ``newFlage`` and ``timestamp``. The
     name is written without surrounding spaces."""
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("an activity type's name must be text")
-    written = name.strip()
-    if len(written) > MAX_ACTIVITY_TYPE_NAME_LENGTH:
-        raise ValueError(
-            "an activity type's name can't be longer than "
-            f"{MAX_ACTIVITY_TYPE_NAME_LENGTH} characters"
-        )
+    written = _text(name, "an activity type's name", MAX_PICK_LIST_NAME_LENGTH)
 
     def build(object_id: str, baby: Baby | None, timestamp: datetime) -> OtherActivityDescription:
         return OtherActivityDescription(

@@ -11,7 +11,7 @@ from fake_server import FakeSyncServer
 from selection_helpers import posted, rid, seed, synced
 
 from pybabytracker import (
-    MAX_ACTIVITY_TYPE_NAME_LENGTH,
+    MAX_PICK_LIST_NAME_LENGTH,
     OP_DELETE,
     AccountChangedError,
     BabyTrackerClient,
@@ -134,7 +134,7 @@ async def test_a_name_already_on_the_list_is_refused_with_no_request(
     assert len(fake_server.requests) == before
 
 
-@pytest.mark.parametrize("name", ["", "   ", 7, None, "x" * (MAX_ACTIVITY_TYPE_NAME_LENGTH + 1)])
+@pytest.mark.parametrize("name", ["", "   ", 7, None, "x" * (MAX_PICK_LIST_NAME_LENGTH + 1)])
 async def test_a_bad_name_is_refused_with_no_request(
     client: BabyTrackerClient, fake_server: FakeSyncServer, name: Any
 ) -> None:
@@ -153,7 +153,7 @@ async def test_the_longest_name_is_allowed_and_a_retry_posts_nothing_more(
     seed(fake_server)
     engine = await synced(client)
     object_id = "B0000000-0000-4000-8000-0000000000AA"
-    name = "x" * MAX_ACTIVITY_TYPE_NAME_LENGTH
+    name = "x" * MAX_PICK_LIST_NAME_LENGTH
 
     first = await engine.add_activity_type(client, name, object_id=object_id)
     again = await engine.add_activity_type(client, name, object_id=object_id.lower())
