@@ -392,6 +392,34 @@ async def test_two_conflicts_that_reverse_each_other_leave_one_entry(
     assert named_food(engine, rid(5)) == winner
 
 
+async def test_a_conflict_between_two_entries_already_folded_into_a_third_changes_nothing(
+    client: BabyTrackerClient, fake_server: FakeSyncServer
+) -> None:
+    third = {**FOOD, "objectID": "5A000000-0000-4000-8000-0000000000F3"}
+    seed(fake_server, FOOD, TWIN, third, solid_of(FOOD, 3), solid_of(TWIN, 4))
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(TWIN, FOOD))
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(third, TWIN))
+    engine = await synced(client)
+    assert {named_food(engine, rid(3)), named_food(engine, rid(4))} == {third["objectID"]}
+
+    # Both are the third entry by now, so this names no entry that is left to fold.
+    fake_server.add_transaction(PHONE, OP_CONFLICT, conflict(FOOD, TWIN))
+    await engine.sync(client)
+
+    assert [c.object_id for c in engine.food_choices() if c.name == "Oatmeal"] == [
+        third["objectID"]
+    ]
+    assert {named_food(engine, rid(3)), named_food(engine, rid(4))} == {third["objectID"]}
+    assert engine.merged_entries() == {
+        FOOD["objectID"].upper(): TWIN["objectID"],
+        TWIN["objectID"].upper(): third["objectID"],
+    }
+    late = solid_of(FOOD, 5)
+    fake_server.add_transaction(PHONE, OP_ADD, late)
+    await engine.sync(client)
+    assert named_food(engine, rid(5)) == third["objectID"]
+
+
 async def test_a_fold_repoints_a_record_that_names_the_loser_by_a_plain_id(
     client: BabyTrackerClient, fake_server: FakeSyncServer
 ) -> None:
