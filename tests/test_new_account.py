@@ -7,6 +7,7 @@ import io
 import sqlite3
 import time
 import zipfile
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -88,11 +89,23 @@ def calls(server: FakeSyncServer) -> list[tuple[str, str]]:
     return [(r.method, r.path) for r in server.requests]
 
 
+_OPENED: list[sqlite3.Connection] = []
+
+
+@pytest.fixture(autouse=True)
+def close_databases() -> Iterator[None]:
+    yield
+    while _OPENED:
+        _OPENED.pop().close()
+
+
 def opened(seed: bytes) -> sqlite3.Connection:
+    """The seed's database, closed when the test ends."""
     with zipfile.ZipFile(io.BytesIO(seed)) as zipped:
         assert zipped.namelist() == ["EasyLog.db"]
         data = zipped.read("EasyLog.db")
     database = sqlite3.connect(":memory:")
+    _OPENED.append(database)
     database.deserialize(data)
     return database
 
