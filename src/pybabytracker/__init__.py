@@ -4,7 +4,6 @@ from ._version import __version__
 from .builders import (
     GROWTH_RANGES,
     MAX_ACTIVITY_MINUTES,
-    MAX_ACTIVITY_TYPE_NAME_LENGTH,
     MAX_BABY_NAME_LENGTH,
     MAX_FOOD_NAME_LENGTH,
     MAX_MEDICINE_AMOUNT,
@@ -140,7 +139,6 @@ from .totals import DayTotals, LastBreast, day_totals, last_breast
 __all__ = [
     "MAX_PICK_LIST_DESCRIPTION_LENGTH",
     "MAX_PICK_LIST_NAME_LENGTH",
-    "MAX_ACTIVITY_TYPE_NAME_LENGTH",
     "MAX_BABY_NAME_LENGTH",
     "MAX_MEDICINE_AMOUNT",
     "MAX_MEDICINE_INTERVAL",

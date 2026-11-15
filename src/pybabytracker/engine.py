@@ -216,9 +216,6 @@ from .selections import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# What ``delete_record`` won't delete for another device, and ``edit_record`` won't edit: the
-# apps refuse to delete a baby or a pick-list entry that is still in use, they aren't records
-# with a time and a note, and an unknown type can't be checked.
 # The pick lists' own record types. An entry can be renamed, and deleted once no record names it.
 _PICK_LIST_TYPES = (
     MedicationSelection,
@@ -227,15 +224,9 @@ _PICK_LIST_TYPES = (
     OtherFeedSelection,
     VaccineSelection,
 )
-_NOT_DELETABLE_FROM_OTHERS = (
-    Baby,
-    MedicationSelection,
-    MilestoneSelection,
-    OtherActivityDescription,
-    OtherFeedSelection,
-    VaccineSelection,
-    UnknownRecord,
-)
+# What ``edit_record`` won't edit: a baby and a pick-list entry aren't records with a time and a
+# note, and an unknown type can't be checked.
+_NOT_EDITABLE = (Baby, *_PICK_LIST_TYPES, UnknownRecord)
 
 STATE_VERSION = 4
 # How this library reads a seed. Raise it when a fix reads more out of seeds: state saved at an
@@ -571,7 +562,7 @@ class SyncEngine:
         type the library doesn't know. ``object_id`` can be in either case. The ``edit_*`` methods
         for each record type also change a record's own fields.
         """
-        edit = Edit(common_changes(time=time, timezone_offset=timezone_offset, note=note))
+        edit = Edit(_some(common_changes(time=time, timezone_offset=timezone_offset, note=note)))
 
         def changes_for(record: Record) -> Edit:
             if time is not None and isinstance(record, Sleep) and record.is_running:
@@ -597,9 +588,7 @@ class SyncEngine:
         to none and a change to wet sets it to normal, as the Android app's screen does. A
         record that isn't a diaper raises ``WrongRecordTypeError``.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
         edit = Edit(_some({**diaper_changes(status, amount), **common}))
         record = await self._edit(target, object_id, lambda record: edit, Diaper)
         assert isinstance(record, Diaper)
@@ -621,9 +610,7 @@ class SyncEngine:
         different record types, so delete the bottle and add the other. A record that isn't a
         bottle raises ``WrongRecordTypeError``.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
         edit = Edit(_some({**bottle_changes(volume), **common}))
         record = await self._edit(target, object_id, lambda record: edit, Formula, Pumped)
         assert isinstance(record, Formula | Pumped)
@@ -652,9 +639,7 @@ class SyncEngine:
         carries the timer's own timestamps, and how the app edits one hasn't been seen. Its
         time, zone, and note can.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
 
         def changes(record: Record) -> Edit:
             assert isinstance(record, Nursing)
@@ -694,9 +679,7 @@ class SyncEngine:
         checks are ``add_sleep``'s: the end after the start, at most 24 hours, and the length
         in whole minutes, rounded half up and at least 1.
         """
-        common = common_changes(
-            time=None, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=None, timezone_offset=timezone_offset, note=note)
 
         def changes(record: Record) -> Edit:
             assert isinstance(record, Sleep)
@@ -720,9 +703,7 @@ class SyncEngine:
         ``Measurement(value, "C")``, checked as for ``add_temperature``), and its time, zone,
         and note as for ``edit_record``, whose rules it shares. Give at least one.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
         edit = Edit(_some({**temperature_changes(temperature), **common}))
         record = await self._edit(target, object_id, lambda record: edit, Temperature)
         assert isinstance(record, Temperature)
@@ -746,9 +727,7 @@ class SyncEngine:
         kept, and one can't be removed. A new length or head must be in the unit of the other,
         given or saved.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
 
         def changes(record: Record) -> Edit:
             assert isinstance(record, Growth)
@@ -781,7 +760,7 @@ class SyncEngine:
         """
         fixed = {
             **medication_changes(amount),
-            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note),
         }
         if medicine is None:
             _some(fixed)
@@ -823,7 +802,7 @@ class SyncEngine:
         """
         fixed = {
             **other_feed_changes(amount, unit),
-            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note),
         }
         if food is None:
             _some(fixed)
@@ -859,7 +838,7 @@ class SyncEngine:
         """
         fixed = {
             **activity_changes(duration),
-            **common_changes(time=time, timezone_offset=timezone_offset, note=note, required=False),
+            **common_changes(time=time, timezone_offset=timezone_offset, note=note),
         }
         if activity is None:
             _some(fixed)
@@ -896,9 +875,7 @@ class SyncEngine:
         Naming the milestone it already has changes nothing. Its photos are changed with
         ``add_pictures`` and ``remove_pictures``.
         """
-        fixed = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        fixed = common_changes(time=time, timezone_offset=timezone_offset, note=note)
         if milestone is None:
             _some(fixed)
         else:
@@ -933,9 +910,7 @@ class SyncEngine:
         embedded the same way, in place of the one the record had. Naming the vaccine it
         already has changes nothing.
         """
-        fixed = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        fixed = common_changes(time=time, timezone_offset=timezone_offset, note=note)
         if vaccine is None:
             _some(fixed)
         else:
@@ -976,9 +951,7 @@ class SyncEngine:
         total becomes their sum. Minutes and the side not given are kept, and the pump must
         still have a volume or a length.
         """
-        common = common_changes(
-            time=time, timezone_offset=timezone_offset, note=note, required=False
-        )
+        common = common_changes(time=time, timezone_offset=timezone_offset, note=note)
 
         def changes(record: Record) -> Edit:
             assert isinstance(record, Pump)
@@ -1176,10 +1149,7 @@ class SyncEngine:
         if object_id in self.babies():
             raise WrongRecordTypeError(f"record {object_id} is a Baby, not a {wanted}")
         record = self._saved_record(object_id)
-        if kinds:
-            refused = not isinstance(record, kinds)
-        else:
-            refused = isinstance(record, _NOT_DELETABLE_FROM_OTHERS)
+        refused = not isinstance(record, kinds) if kinds else isinstance(record, _NOT_EDITABLE)
         if refused:
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, not a {wanted}"
@@ -1204,10 +1174,7 @@ class SyncEngine:
 
         def changes(record: Record) -> Edit:
             what, choices = self._entry_list(record)
-            for choice in choices:
-                same = self._resolve_id(choice.object_id, (record.object_id,)) is not None
-                if choice.name.strip().casefold() == written.casefold() and not same:
-                    raise SelectionExistsError(what, written, choice.object_id)
+            self._refuse_taken_name(what, written, choices, record.object_id)
             return Edit({"name": written})
 
         return await self._edit(target, object_id, changes, *_PICK_LIST_TYPES)
@@ -1229,10 +1196,6 @@ class SyncEngine:
         empty list), ``RecordNotFoundError`` for a record never seen or deleted, and
         ``WrongRecordTypeError`` for any other record type. ``object_id`` can be in either case.
         """
-        if pictures is not None and (
-            isinstance(pictures, str | bytes) or not isinstance(pictures, Sequence) or not pictures
-        ):
-            raise ValueError("pictures must be a list of picture IDs, or None for every picture")
         record = await self._edit(
             target,
             object_id,
@@ -1548,7 +1511,7 @@ class SyncEngine:
         The type is posted as its own ``OtherActivityDescription``, as the apps post a new food
         or medicine before the first record that names it, so log an activity with
         ``add_activity`` and the returned record's ``object_id``. ``name`` is written without
-        surrounding spaces, at most ``MAX_ACTIVITY_TYPE_NAME_LENGTH`` characters. A name already
+        surrounding spaces, at most ``MAX_PICK_LIST_NAME_LENGTH`` characters. A name already
         on the list (ignoring case, built-in or not) raises ``SelectionExistsError`` with that
         type's ID, and a bad name ``ValueError``, before any request. The type belongs to the
         account, not a baby. ``object_id`` works as for ``add_diaper``.
@@ -1556,15 +1519,7 @@ class SyncEngine:
 
         def resolve() -> Draft[OtherActivityDescription]:
             draft = draft_activity_type(name)
-            wanted = name.strip().casefold()
-            for choice in self.activity_choices():
-                # A retry names the type that landed, whatever the case of its id.
-                is_retry = (
-                    object_id is not None
-                    and self._resolve_id(object_id, (choice.object_id,)) is not None
-                )
-                if choice.name.strip().casefold() == wanted and not is_retry:
-                    raise SelectionExistsError("activity", name.strip(), choice.object_id)
+            self._refuse_taken_name("activity", name, self.activity_choices(), object_id)
             return draft
 
         resolve()
@@ -2171,9 +2126,7 @@ class SyncEngine:
             # records carry has records by definition.
             self._refuse_baby_in_use(object_id)
         record = self._saved_record(object_id)
-        if isinstance(record, _NOT_DELETABLE_FROM_OTHERS) and not isinstance(
-            record, (*_PICK_LIST_TYPES, Baby)
-        ):
+        if isinstance(record, UnknownRecord):  # a type the library can't check
             raise WrongRecordTypeError(
                 f"record {object_id} is a {record.record_type or 'record'}, which only the "
                 "device that created it can delete"
