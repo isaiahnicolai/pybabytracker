@@ -27,6 +27,7 @@ from .exceptions import (
     DownloadRefusedError,
     EndBeforeStartError,
     EntryInUseError,
+    GroupExistsError,
     InvalidAmountError,
     InvalidSelectionNameError,
     MinutesTooLongError,
@@ -125,6 +126,7 @@ from .models import (
     numeric_code,
 )
 from .seed import Seed, read_seed
+from .seed_writer import new_seed
 from .selections import (
     BUILT_IN_ACTIVITIES,
     BUILT_IN_FOODS,
@@ -185,6 +187,7 @@ __all__ = [
     "Diaper",
     "DoctorVisit",
     "EndBeforeStartError",
+    "GroupExistsError",
     "Formula",
     "Growth",
     "HealthQuestion",
@@ -275,6 +278,7 @@ __all__ = [
     "last_breast",
     "numeric_code",
     "parse_time",
+    "new_seed",
     "read_seed",
     "standard_offset_seconds",
     "to_unix",
