@@ -344,7 +344,8 @@ client's password. For one that already has a group it raises `GroupExistsError`
 nothing; it never replaces a group. The seed has every table and index the Android app creates,
 and the pick-list entries it ships with, checked against a real account's seed. Seen against the
 live service: an account made this way signs in, gives its seed back, and takes records from two
-devices. A new group lists no device until one posts. Not yet seen: a phone joining such a group.
+devices. A new group lists no device until one posts. An Android phone then joined the group and
+showed every record. Not yet seen: an iPhone joining one.
 
 ## Command line
 
