@@ -24,12 +24,6 @@ from .times import format_time, parse_time
 OP_ADD = 0
 OP_UPDATE = 1
 OP_DELETE = 2
-# The apps' two repair operations, from the Android app's own list of opcodes. Neither has been
-# seen in synced data (``SyncEngine``'s merge rules say how each is applied).
-# A Relive carries a baby or pick-list entry back after a device refused its delete because
-# records still used it. A Conflict carries two babies or entries that share a name.
-OP_RELIVE = 3
-OP_CONFLICT = 4
 
 DIAPER_WET = 0
 DIAPER_DIRTY = 1
