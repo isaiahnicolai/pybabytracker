@@ -98,6 +98,10 @@ and [pictures](#pictures). Every write shares these rules:
   (`ProtocolError`) rather than skipping the missing entries.
 - A confirmed write is applied locally at once, so the next sync doesn't fetch it back.
 - Writes and syncs share a lock, so concurrent writes get consecutive numbers.
+- An `object_id` matches whatever its case. The Android app writes lowercase UUIDs and the
+  iPhone app uppercase ones, and a record keeps the ID it has, so an edit, an end, or a delete
+  is posted under the stored ID. A new record's ID is written in uppercase. The `baby_id` of an
+  add is matched exactly, so pass it as `babies()` gives it.
 - Save `to_dict()` after every write, including one that raised: a pending post lives only in
   that state. Use one device ID per running process; two processes writing as one device can
   collide on a number while `LastSyncID` lags.
@@ -420,8 +424,8 @@ pump (one length for both sides, never under 1 minute).
 
 ### Day totals and write validation
 
-`day_totals(records, baby_id, start, end)` counts a baby's diapers (wet, dirty, and mixed; a dry
-one counts only in the total), feeds, nursing sessions and their minutes, and bottle volume in
+`day_totals(records, baby_id, start, end)` counts a baby's diapers (in total, and wet, dirty,
+mixed, and dry), feeds, nursing sessions and their minutes, and bottle volume in
 milliliters from `start` up to `end`. `last_breast(records, now)` is the newest nursing or pump,
 with its side, as the app shows it before the next session. The caller passes the bounds, so a local calendar
 day, including a 23- or 25-hour day at a clock change, is local midnight to the next local
